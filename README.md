@@ -62,6 +62,8 @@ memory/
 ├── templates/              checkpoint.md, lesson.md schemas
 └── hooks/                  Working, opt-in hook implementation — see
                              "Using it today" below (install.sh --with-memory-hooks)
+    └── test/run.sh         16-case suite incl. Windows lockfile concurrency —
+                             run after touching anything under memory/hooks/
 
 skills/
 ├── manifest.yaml           44 skills, 12 categories, portable contract

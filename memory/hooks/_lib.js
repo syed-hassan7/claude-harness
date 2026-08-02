@@ -145,7 +145,7 @@ function releaseLock(lockPath) {
 // fs.renameSync uses MoveFileExW w/ MOVEFILE_REPLACE_EXISTING on Windows,
 // not a shell `mv` — the Git-Bash-`mv`-under-contention caveat in
 // memory/SPEC.md does not apply to this code path; verified empirically,
-// see memory/hooks/test/concurrency.md).
+// see memory/hooks/test/run.sh, Test 12).
 function atomicWrite(filePath, content) {
   const dir = path.dirname(filePath);
   const tmp = path.join(dir, `.${path.basename(filePath)}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`);

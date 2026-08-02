@@ -22,9 +22,11 @@ function main() {
   const lessonsIndexPath = path.join(base, 'lessons', 'index.md');
   const cpPath = path.join(sessionDir, 'checkpoint.md');
 
-  lib.ensureDir(sessionDir);
-  if (scope === 'project') lib.ensureGitignore(sessionDir);
-
+  // Read-only path: do NOT create sessionDir/.gitignore here. This hook runs
+  // on every SessionStart in every repo it's wired into — unconditionally
+  // creating a directory (even a gitignored one) as a side effect of a read
+  // is a footprint on someone else's repo they never asked for. Only the
+  // rotation branch below writes anything, and it ensureDir's its own target.
   const parts = [];
 
   if (fs.existsSync(cpPath)) {
