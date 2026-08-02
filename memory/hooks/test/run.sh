@@ -200,6 +200,106 @@ TMPLEFT=$(find "$CONC_HOME/.claude/session" -name '.checkpoint.md.tmp.*' 2>/dev/
 pass "checkpoint survived 20-way concurrent writes: valid, no leftover lock/tmp files"
 
 echo ""
+echo "=== Test 14: project archive trim -- day-based cutoff (independent of count cap) ==="
+TRIM_PROJECT_POSIX="$WORK/trim_project"
+mkdir -p "$TRIM_PROJECT_POSIX"
+(cd "$TRIM_PROJECT_POSIX" && git init -q)
+TRIM_PROJECT=$(win_path "$TRIM_PROJECT_POSIX")
+TRIM_ARCHIVE="$TRIM_PROJECT_POSIX/.claude/session/archive"
+mkdir -p "$TRIM_ARCHIVE"
+mkdir -p "$TRIM_PROJECT_POSIX/.claude/session"
+echo -e "# Session checkpoint\nscope: project\nrepo: trim_project\nsession_id: sT\nupdated: $(date -u +%Y-%m-%dT%H:%M:%S.000Z)\ngoal: \n" > "$TRIM_PROJECT_POSIX/.claude/session/checkpoint.md"
+# 3 recent archive files (today) + 2 old ones (10 days ago) -- only 5 total,
+# well under the count cap of 10, so ONLY the day-cutoff should remove the 2 old ones.
+for i in 1 2 3; do echo "recent $i" > "$TRIM_ARCHIVE/2026-recent-$i.md"; done
+for i in 1 2; do
+  echo "old $i" > "$TRIM_ARCHIVE/2020-old-$i.md"
+  touch -d "10 days ago" "$TRIM_ARCHIVE/2020-old-$i.md" 2>/dev/null || touch -d "@$(( $(date +%s) - 864000 ))" "$TRIM_ARCHIVE/2020-old-$i.md"
+done
+run_hook memory-compact.js "$TRIM_PROJECT" '{"cwd":"'"$TRIM_PROJECT"'"}' > /dev/null
+REMAINING=$(find "$TRIM_ARCHIVE" -name '*.md' | wc -l)
+# 3 recent + 1 newly-archived-by-this-compact-call = 4 expected; the 2 old ones must be gone.
+[ "$REMAINING" -eq 4 ] || fail "expected 4 archive files after day-cutoff trim (3 recent + 1 just-archived), found $REMAINING"
+find "$TRIM_ARCHIVE" -name '2020-old-*' | grep -q . && fail "day-old archive files survived trim (day-based cutoff not enforced)" || pass "day-based cutoff removed old files independent of count cap"
+
+echo "=== Test 15: project archive trim -- count cap (16 recent files -> keep newest 10) ==="
+rm -rf "$TRIM_ARCHIVE"
+mkdir -p "$TRIM_ARCHIVE"
+for i in $(seq 1 15); do
+  echo "entry $i" > "$TRIM_ARCHIVE/2026-entry-$(printf '%02d' "$i").md"
+done
+echo -e "# Session checkpoint\nscope: project\nrepo: trim_project\nsession_id: sT\nupdated: $(date -u +%Y-%m-%dT%H:%M:%S.000Z)\ngoal: \n" > "$TRIM_PROJECT_POSIX/.claude/session/checkpoint.md"
+run_hook memory-compact.js "$TRIM_PROJECT" '{"cwd":"'"$TRIM_PROJECT"'"}' > /dev/null
+REMAINING2=$(find "$TRIM_ARCHIVE" -name '*.md' | wc -l)
+[ "$REMAINING2" -eq 10 ] || fail "expected exactly 10 archive files after count-cap trim (15 + 1 just-archived = 16 total), found $REMAINING2"
+find "$TRIM_ARCHIVE" -name '2026-entry-01.md' | grep -q . && fail "oldest entry (01) survived count-cap trim -- should have been evicted" || pass "count cap correctly evicted oldest entries, kept newest 10"
+
+echo "=== Test 16: global archive trim -- wipes to exactly 1 (the just-written entry), twice in a row ==="
+TRIM_GLOBAL_POSIX="$WORK/trim_global"
+mkdir -p "$TRIM_GLOBAL_POSIX"
+TRIM_GLOBAL=$(win_path "$TRIM_GLOBAL_POSIX")
+TRIM_GLOBAL_NONGIT_POSIX="$WORK/trim_global_cwd"
+mkdir -p "$TRIM_GLOBAL_NONGIT_POSIX"
+TRIM_GLOBAL_NONGIT=$(win_path "$TRIM_GLOBAL_NONGIT_POSIX")
+CLAUDE_HARNESS_HOME_OVERRIDE="$TRIM_GLOBAL" run_hook memory-checkpoint.js "$TRIM_GLOBAL_NONGIT" '{"cwd":"'"$TRIM_GLOBAL_NONGIT"'","session_id":"sG","tool_input":{"file_path":"/a.js"}}'
+CLAUDE_HARNESS_HOME_OVERRIDE="$TRIM_GLOBAL" run_hook memory-compact.js "$TRIM_GLOBAL_NONGIT" '{"cwd":"'"$TRIM_GLOBAL_NONGIT"'"}'
+FIRST_COUNT=$(find "$TRIM_GLOBAL_POSIX/.claude/session/archive" -name '*.md' | wc -l)
+[ "$FIRST_COUNT" -eq 1 ] || fail "expected exactly 1 global archive file after first PreCompact, found $FIRST_COUNT"
+sleep 1
+CLAUDE_HARNESS_HOME_OVERRIDE="$TRIM_GLOBAL" run_hook memory-checkpoint.js "$TRIM_GLOBAL_NONGIT" '{"cwd":"'"$TRIM_GLOBAL_NONGIT"'","session_id":"sG","tool_input":{"file_path":"/b.js"}}'
+CLAUDE_HARNESS_HOME_OVERRIDE="$TRIM_GLOBAL" run_hook memory-compact.js "$TRIM_GLOBAL_NONGIT" '{"cwd":"'"$TRIM_GLOBAL_NONGIT"'"}'
+SECOND_COUNT=$(find "$TRIM_GLOBAL_POSIX/.claude/session/archive" -name '*.md' | wc -l)
+[ "$SECOND_COUNT" -eq 1 ] || fail "expected exactly 1 global archive file after second PreCompact (old one should be wiped), found $SECOND_COUNT"
+pass "global archive trim wipes to exactly 1 entry, each time, across repeated PreCompact calls"
+
+echo "=== Test 17: stale lock (>10s old) is reclaimed, write succeeds ==="
+STALE_HOME_POSIX="$WORK/stale_home"
+mkdir -p "$STALE_HOME_POSIX/.claude/session"
+STALE_HOME=$(win_path "$STALE_HOME_POSIX")
+STALE_CWD_POSIX="$WORK/stale_cwd"
+mkdir -p "$STALE_CWD_POSIX"
+STALE_CWD=$(win_path "$STALE_CWD_POSIX")
+echo "held by a dead process" > "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock"
+touch -d "20 seconds ago" "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock" 2>/dev/null || touch -d "@$(( $(date +%s) - 20 ))" "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock"
+CLAUDE_HARNESS_HOME_OVERRIDE="$STALE_HOME" run_hook memory-checkpoint.js "$STALE_CWD" '{"cwd":"'"$STALE_CWD"'","session_id":"sS","tool_input":{"file_path":"/stale-test.js"}}'
+[ -f "$STALE_HOME_POSIX/.claude/session/checkpoint.md" ] || fail "write did not happen -- stale lock (>10s) was not reclaimed"
+grep -q "stale-test.js" "$STALE_HOME_POSIX/.claude/session/checkpoint.md" || fail "checkpoint written but missing expected content after stale-lock reclaim"
+[ -f "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock" ] && fail "lock left behind after successful stale-lock-reclaim write" || pass "stale lock (>10s) reclaimed, write succeeded, lock released"
+
+echo "=== Test 18: FRESH lock (not stale) blocks the write -- hook skips gracefully, exits 0 ==="
+FRESH_HOME_POSIX="$WORK/fresh_home"
+mkdir -p "$FRESH_HOME_POSIX/.claude/session"
+FRESH_HOME=$(win_path "$FRESH_HOME_POSIX")
+FRESH_CWD_POSIX="$WORK/fresh_cwd"
+mkdir -p "$FRESH_CWD_POSIX"
+FRESH_CWD=$(win_path "$FRESH_CWD_POSIX")
+echo "held by a live process, right now" > "$FRESH_HOME_POSIX/.claude/session/.checkpoint.lock"
+# fresh mtime (just created) -- well under the 10s stale threshold
+EXITCODE=0
+(CLAUDE_HARNESS_HOME_OVERRIDE="$FRESH_HOME" bash -c "cd '$FRESH_CWD' && echo '{\"cwd\":\"$FRESH_CWD\",\"session_id\":\"sF\",\"tool_input\":{\"file_path\":\"/should-not-be-written.js\"}}' | node '$HOOKS/memory-checkpoint.js'") || EXITCODE=$?
+[ "$EXITCODE" -eq 0 ] || fail "hook exited nonzero ($EXITCODE) when lock was contended -- must fail open, not fail loud"
+[ -f "$FRESH_HOME_POSIX/.claude/session/checkpoint.md" ] && fail "write happened despite fresh contended lock -- lock is not actually being respected" || pass "fresh contended lock correctly blocks the write; hook still exits 0"
+rm -f "$FRESH_HOME_POSIX/.claude/session/.checkpoint.lock"
+
+echo "=== Test 19: MAX_FILES=50 trimming -- 60 writes, exactly 50 newest survive ==="
+MAXF_HOME_POSIX="$WORK/maxf_home"
+mkdir -p "$MAXF_HOME_POSIX"
+MAXF_HOME=$(win_path "$MAXF_HOME_POSIX")
+MAXF_CWD_POSIX="$WORK/maxf_cwd"
+mkdir -p "$MAXF_CWD_POSIX"
+MAXF_CWD=$(win_path "$MAXF_CWD_POSIX")
+for i in $(seq 1 60); do
+  CLAUDE_HARNESS_HOME_OVERRIDE="$MAXF_HOME" run_hook memory-checkpoint.js "$MAXF_CWD" "{\"cwd\":\"$MAXF_CWD\",\"session_id\":\"sM\",\"tool_input\":{\"file_path\":\"/f$i.js\"}}" > /dev/null
+done
+MAXF_CP="$MAXF_HOME_POSIX/.claude/session/checkpoint.md"
+MAXF_FILECOUNT=$(grep -c "^  - " "$MAXF_CP")
+[ "$MAXF_FILECOUNT" -eq 50 ] || fail "expected exactly 50 files in checkpoint after 60 writes (MAX_FILES cap), found $MAXF_FILECOUNT"
+grep -q "/f1\.js" "$MAXF_CP" && fail "oldest file (/f1.js) survived MAX_FILES trim -- should have been evicted" || true
+grep -q "/f60\.js" "$MAXF_CP" || fail "newest file (/f60.js) missing -- should always survive"
+grep -q "/f11\.js" "$MAXF_CP" || fail "expected /f11.js (the 50th-newest, i.e. oldest survivor) to be present"
+pass "MAX_FILES=50 correctly trims to the newest 50 entries"
+
+echo ""
 echo "=== Test 13: real ~/.claude/session left untouched by this entire run ==="
 if [ -e ~/.claude/session ]; then
   fail "real ~/.claude/session exists after a fully-scoped test run -- pollution regression"

@@ -8,12 +8,17 @@ if [ -z "$input" ]; then
     exit 0
 fi
 
-# jq was just installed via winget; PATH may not refresh in an already-open
-# terminal until it's restarted. Fall back to the known install path so this
-# doesn't silently break until then.
+# Found by testing (2026-08-02): this used to fall back to one developer's
+# hardcoded WinGet install path, which only ever worked on that one machine.
+# On any other machine without jq on PATH, every jq call below silently fails
+# ("jq: command not found" to stderr) and the script keeps going with empty
+# variables -- producing a statusline that LOOKS like real data ("Context
+# Window: 0%") but is actually just failed-parse zeros. That's worse than an
+# explicit error: 0% reads as a measurement, not as "unknown." Fail loud and
+# short instead.
 if ! command -v jq >/dev/null 2>&1; then
-    _jq_fallback="/c/Users/SyedHassan/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe/jq.exe"
-    [ -x "$_jq_fallback" ] && jq() { "$_jq_fallback" "$@"; }
+    printf "claude-harness statusline: jq not found on PATH — see statusline/README.md"
+    exit 0
 fi
 
 # ── Colors ──────────────────────────────────────────────

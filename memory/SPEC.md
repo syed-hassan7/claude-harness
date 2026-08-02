@@ -111,7 +111,7 @@ See `memory/templates/checkpoint.md` for the literal template. Fields: `scope`, 
 
 ## Mistake-memory (self-learning from corrections and wasted effort)
 
-**Status:** spec + rules only, same as the rest of this file — no hook `.js` files, no `settings.json` changes ship in this document. Research trail: `skills/RESEARCH.md` §9 and §11 (§11 is a v2 pass that found and closed four real gaps in this section — read it if you want the "why," not just the "what"). Manifest reference entries: `skills/manifest.yaml`.
+**Status:** split, precisely. **Detection and writing are spec + rules only, by design** — no hook fires on "the user just corrected me" (see below), so a lesson only ever gets written by the agent's own judgment passing the criticality check. **Injection is implemented**: `memory/hooks/memory-init.js` reads `<scope>/lessons/index.md` at `SessionStart` and injects it alongside the checkpoint, same as this section's "Injection" bullet below describes — that part is no longer spec-only, it shipped with the checkpoint hooks. Research trail: `skills/RESEARCH.md` §9 and §11 (§11 is a v2 pass that found and closed four real gaps in this section — read it if you want the "why," not just the "what"). Manifest reference entries: `skills/manifest.yaml`.
 
 This is distinct from the checkpoint system above — checkpoints persist *session continuity* (what was I doing); this persists *lessons* (what did I get wrong, and why won't I repeat it). Same dual-scope split, different content and a different write trigger.
 
