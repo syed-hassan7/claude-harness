@@ -11,7 +11,7 @@ weekly  ●●○○○○○○○○  28% ⟳ resets in - 5 days 3 hrs
 
 ## Setup
 
-**Requires:** `bash` + [`jq`](https://jqlang.org/). On Windows this runs through Git Bash — see [Claude Code's Windows statusline notes](https://code.claude.com/docs/en/statusline#windows-configuration) if `jq` isn't already on `PATH`.
+**Requires:** `bash` + [`jq`](https://jqlang.org/). On Windows this runs through Git Bash — see [Claude Code's Windows statusline notes](https://code.claude.com/docs/en/statusline#windows-configuration) if `jq` isn't already on `PATH`. **If `jq` is missing, the script now prints a one-line error and exits instead of running** (found 2026-08-02: it used to silently continue with empty variables, producing a statusline that looked like real data — e.g. "Context Window: 0%" — instead of an obvious error). To fix on Windows: `winget install jqlang.jq`, then **restart your terminal** — PATH doesn't refresh in an already-open shell.
 
 1. Copy `statusline.sh` to `~/.claude/statusline.sh` (or any path you prefer).
 2. `chmod +x ~/.claude/statusline.sh`

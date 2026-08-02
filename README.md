@@ -72,7 +72,8 @@ skills/
 
 statusline/
 ├── statusline.sh            Drop-in ~/.claude/statusline.sh — see section above
-└── README.md                Setup + what each field means
+├── README.md                Setup + what each field means
+└── test.sh                  Regression test — run after touching statusline.sh
 
 install.sh                  Idempotent installer — pack files -> ~/.claude/claude-harness/,
                              statusline -> ~/.claude/statusline.sh, marked pointer
