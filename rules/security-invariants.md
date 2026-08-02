@@ -23,6 +23,12 @@ Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) bl
 - Secrets live in environment variables — never hardcoded in source, never committed, never logged.
 - Use UUIDs for user-facing resource IDs — sequential integer IDs leak enumeration information.
 
+## Tier 0 — Web transport & session hygiene (always)
+
+- Every `<form>` with sensitive fields must have `method="post"` — HTML defaults to GET, and a hydration failure puts field values in the URL, browser history, and server logs.
+- Cookies: `SameSite=None; Secure` in production (cross-origin), `SameSite=Lax` in dev. Never `SameSite=Strict` — breaks legitimate cross-site navigation flows without adding real protection over `Lax`.
+- Trust the **last** hop of `X-Forwarded-For` for security/rate-limit decisions (`[-1]`, load-balancer-appended, unforgeable) — never the first (`[0]`, client-controlled, trivially spoofed).
+
 ## Tier 0 — Agent behavior (always)
 
 - Never mutate a user's global agent configs (`~/.claude`, `~/.cursor`, shell rc files, global git config) unless explicitly asked.

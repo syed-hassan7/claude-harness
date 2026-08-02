@@ -80,6 +80,27 @@ skills:
     source: "bundled"
     notes: "Maps to retained /security-review and /security-spec commands — see CLAUDE_HARNESS_ANALYSIS.md §0."
 
+  - name: review-loop
+    role: "Dual-review engineering loop: internal agent audit + CodeRabbit, triage, fix, re-review, human gate before commit/merge"
+    required: false
+    trigger: "pre-merge, or user runs /review-loop"
+    source: "bundled"
+    notes: "Locally installed at ~/.claude/skills/review-loop — not researched/vetted in skills/RESEARCH.md, documented here for manifest accuracy only."
+
+  - name: red-team-desk
+    role: "Authorized defensive static security + GRC readiness suite — dual-track finding/control graph, posture heatmap, remediations"
+    required: false
+    trigger: "pentest, red-team, security posture, pre-launch review"
+    source: "bundled"
+    notes: "Locally installed at ~/.claude/skills/red-team-desk — not researched/vetted in skills/RESEARCH.md, documented here for manifest accuracy only."
+
+  - name: tender-pdf
+    role: "Tender/RFP PDF handling for pre-sales workflows"
+    required: false
+    trigger: "tender/RFP document work"
+    source: "bundled"
+    notes: "Locally installed at ~/.claude/skills/tender-pdf — not researched/vetted in skills/RESEARCH.md, documented here for manifest accuracy only."
+
   - name: code-simplifier
     role: "First-party Anthropic post-edit cleanup agent — scoped to recently-modified code"
     required: false
