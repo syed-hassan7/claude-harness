@@ -2,7 +2,9 @@
 
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
-Most agent harnesses try to control the agent: phase gates, edit ceilings, verifier artifacts you have to produce to prove you didn't skip a step. Claude Harness assumes the opposite — a well-briefed agent doesn't need a cage, it needs good judgment, good defaults, and a memory that gets smarter instead of bigger. Works with Claude Code, Cursor, or Codex; nothing here is a plugin you install to get "control back," it's context you hand the agent.
+Most agent harnesses try to control the agent: phase gates, edit ceilings, verifier artifacts you have to produce to prove you didn't skip a step. Claude Harness assumes the opposite — a well-briefed agent doesn't need a cage, it needs good judgment, good defaults, and a memory that gets smarter instead of bigger. Nothing here is a plugin you install to get "control back," it's context you hand the agent.
+
+**Claude Code is the fully-installed target** — `install.sh` wires rules, skills, memory, and the statusline into `~/.claude`. Cursor and Codex aren't wired up yet: no `adapters/cursor/`, no root `AGENTS.md` ship in this repo today. Everything under `rules/` is plain markdown, though — paste `rules/security-invariants.md` into `.cursor/rules/` or an `AGENTS.md` yourself if you're on one of those.
 
 ---
 
@@ -57,7 +59,9 @@ rules/
 memory/
 ├── SPEC.md                 Automatic dual-scope session checkpoints +
 │                           mistake-memory (the self-learning layer above)
-└── templates/checkpoint.md
+├── templates/              checkpoint.md, lesson.md schemas
+└── hooks/                  Working, opt-in hook implementation — see
+                             "Using it today" below (install.sh --with-memory-hooks)
 
 skills/
 ├── manifest.yaml           44 skills, 12 categories, portable contract
@@ -96,7 +100,7 @@ What it deliberately does **not** do:
 
 - **Doesn't touch `settings.json`.** That file holds your existing hooks config — auto-editing structured JSON next to hooks you already depend on is a real corruption risk for no real benefit. If no `statusLine` block is found, the script prints the exact JSON to add by hand (see `statusline/README.md`).
 - **Doesn't copy `rules/security-invariants.md` verbatim into `CLAUDE.md`.** If your `CLAUDE.md` already has hand-written security rules, a blind verbatim append duplicates them under different wording — the opposite of this pack's zero-context-bloat pitch. The pointer block links to the canonical file instead; dedupe your existing prose against it yourself, on your own schedule.
-- **Doesn't ship memory hooks.** `memory/SPEC.md` is architecture + hook-event names + pseudocode only — working `.js` files are next-PR scope, not installed by this script.
+- **Doesn't install memory hooks by default.** They exist (`memory/hooks/*.js`, tested incl. Windows concurrency — see `memory/SPEC.md`) but fire on every single Edit/Write once wired, so they're opt-in: `./install.sh --with-memory-hooks` copies them into `~/.claude/claude-harness/memory/hooks/` and prints the `settings.json` hook config to paste in yourself — same never-auto-edit-settings.json rule as above.
 
 For Cursor/Codex, or if you'd rather not run a script: everything above still applies by hand — point `AGENTS.md`/`.cursor/rules/` at `rules/security-invariants.md`, reference `rules/engineering.md` + `rules/design-lane.md` + `skills/manifest.yaml`, and treat `memory/SPEC.md` as the memory-layer spec.
 

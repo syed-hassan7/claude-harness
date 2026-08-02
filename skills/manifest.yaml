@@ -6,7 +6,7 @@
 # (fetched 2026-08-02, cross-checked twice) — no entry here should carry a
 # claim RESEARCH.md doesn't back up.
 
-version: "5.0.0-draft"
+version: "5.0.0"
 
 skills:
   # ── Engineering (always on) ────────────────────────────────────────────
@@ -448,8 +448,13 @@ skills:
   - name: session-memory
     role: "Automatic dual-scope checkpoint + compact pattern (v5 default memory layer)"
     required: true
-    source: "bundled — see memory/SPEC.md"
-    notes: "File-based hooks, no daemon, no manual /compact. This is the shipped default, not claude-mem."
+    source: "bundled — see memory/SPEC.md, memory/hooks/"
+    notes: >
+      File-based hooks, no daemon, no manual /compact. This is the shipped
+      default, not claude-mem. Hooks are implemented and tested (incl.
+      Windows lockfile concurrency) but opt-in — install.sh --with-memory-hooks,
+      default off, never auto-wired into settings.json. `required: true` means
+      "the default memory layer if you opt in," not "installed for you."
 
   # ── Mistake-memory (self-learning) — reference architectures only, see
   #    memory/SPEC.md "Mistake-memory" section for the actual shipped design.

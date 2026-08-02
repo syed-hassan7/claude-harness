@@ -1,6 +1,6 @@
 # Claude Harness memory layer — automatic, dual-scope
 
-**Status:** architecture + hook event names + pseudocode. No working hook `.js` files ship in this document — that is next-implementation-PR scope (see `CLAUDE_HARNESS_ANALYSIS.md` §6, item 5). Nothing in this file writes to `~/.claude/` or any project directory.
+**Status:** implemented, opt-in. Working hooks ship at `memory/hooks/*.js`, installed via `./install.sh --with-memory-hooks` (default off — see that file's usage comment for why). This document is still the design record; where it now differs from the pseudocode below, `memory/hooks/*.js` is the source of truth. One real gap found and fixed during implementation, kept here rather than smoothed over: `walkForGitRoot`'s scope-detection walk originally had no upper bound, so a git-tracked home directory (dotfiles-as-repo — yadm, chezmoi, bare `git init ~`, all common) would make **every** global-scope session anywhere on disk resolve as project scope rooted at the home directory, once the walk reached `~/.git`. Fixed by capping the walk at (and never counting) the home directory itself — see `memory/hooks/_lib.js`. Caught by testing against a real machine with a git-tracked home dir, not by inspection.
 
 ## Problem this replaces
 
@@ -150,11 +150,14 @@ Confirmed directly against Claude Code's own hooks docs: hook invocations for th
 
 - **Lessons index: append-only.** Hazard eliminated by construction — no read-modify-write ever happens, so no lock is needed (validated pattern, `AnastasiyaW/mclaude`, Windows-tested).
 - **`checkpoint.md`: the one file with real read-modify-write risk.** Lockfile via `O_CREAT|O_EXCL` + a stale-lock timeout, wrapping a temp-file-then-atomic-replace write (same `mclaude` pattern).
-- **Open caveat, stated honestly, not smoothed over:** `os.replace()`'s atomic-swap semantics are confirmed cross-platform, but Git Bash `mv` behavior under contention on Windows specifically was **not** independently verified. Given this design targets Git Bash on Windows as a first-class case, that's a real open item for the implementation PR, not a solved detail.
+- **Resolved:** the caveat this section originally raised was Git Bash `mv` behavior under contention on Windows, never independently verified. The shipped implementation sidesteps it rather than resolving it as originally framed — hooks run as native `node.exe`, not through Git Bash, so the write path is Node's `fs.renameSync` (Win32 `MoveFileExW`), not a shell `mv`. Verified empirically: 20 concurrent `node memory-checkpoint.js` processes racing the same lockfile + checkpoint file, repeated runs, valid output every time, no leftover lock or temp files. See `memory/hooks/_lib.js`'s `acquireLock`/`atomicWrite`.
 
-## Next step
+## Implementation notes (vs. the pseudocode above)
 
-This is the **last spec-only pass** on this subsystem. Two rounds of pure design on the same subsystem is itself the effort-mismatch pattern the mistake-memory section above exists to catch — the next PR ships working `memory-init.js` (`SessionStart`: scope detection, checkpoint + lessons-index injection) and `memory-checkpoint.js` (`PostToolUse`: lockfile-guarded checkpoint write), not another spec revision.
+`memory/hooks/*.js` follows this spec with two intentional, stated simplifications rather than silent scope-narrowing:
+
+- `goal`/`next`/`decisions`/`blockers` are **not** auto-refreshed from "recent assistant intent" the way `maybeRefresh(cp.next, recentAssistantIntent)` above sketches — a `PostToolUse` hook only receives `tool_input`, not conversation content, and parsing the transcript on every single Edit/Write was judged too much risk on the hottest-path hook in this repo. The hook mechanically keeps `files` and `updated` fresh; the agent edits `goal`/`next`/`decisions`/`blockers` directly when something material changes.
+- The lessons-index injection budget is a flat byte cap (8000 bytes, truncate-with-note past it), not the full priority-tiered scheme sketched in the Mistake-memory section below. Documented as a pragmatic first cut, not the final design.
 
 ## Security
 
