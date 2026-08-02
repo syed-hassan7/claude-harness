@@ -68,6 +68,9 @@ statusline/
 ├── statusline.sh            Drop-in ~/.claude/statusline.sh — see section above
 └── README.md                Setup + what each field means
 
+install.sh                  Idempotent installer — pack files -> ~/.claude/claude-harness/,
+                             statusline -> ~/.claude/statusline.sh, marked pointer
+                             block -> ~/.claude/CLAUDE.md. See "Using it today" below.
 WORKFLOW.md                 The loop above, in full
 CLAUDE_HARNESS_ANALYSIS.md  How this pack replaced its own gated predecessor
 ```
@@ -83,12 +86,19 @@ CLAUDE_HARNESS_ANALYSIS.md  How this pack replaced its own gated predecessor
 
 ## Using it today
 
-There's no installer yet for the rules/skills/memory pack — that ships as read-this-and-adopt-it, not run-this-script:
+```
+./install.sh
+```
 
-1. **Statusline first** — it's the only piece that's a working script, not a spec. See the section above; two minutes, immediately visible.
-2. Point your agent's always-loaded context (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`) at `rules/security-invariants.md` verbatim — it's designed to be copied in as-is.
-3. Reference `rules/engineering.md` and `rules/design-lane.md` for the triggered-skill behavior; `skills/manifest.yaml` is the install/version source of truth when a skill actually gets pulled in.
-4. `memory/SPEC.md` is the spec for the session-checkpoint and mistake-memory layers — hook implementations are next-PR scope, not shipped here yet.
+Idempotent — safe to re-run after `git pull`. Copies `rules/`, `skills/`, `memory/`, and `WORKFLOW.md` into a namespaced `~/.claude/claude-harness/` (never touches `~/.claude/skills/` or `~/.claude/memory/` directly — those are host-owned, live directories), installs the statusline script, and writes a single marked, re-runnable pointer block into `~/.claude/CLAUDE.md` — the one file Claude Code actually auto-loads every session.
+
+What it deliberately does **not** do:
+
+- **Doesn't touch `settings.json`.** That file holds your existing hooks config — auto-editing structured JSON next to hooks you already depend on is a real corruption risk for no real benefit. If no `statusLine` block is found, the script prints the exact JSON to add by hand (see `statusline/README.md`).
+- **Doesn't copy `rules/security-invariants.md` verbatim into `CLAUDE.md`.** If your `CLAUDE.md` already has hand-written security rules, a blind verbatim append duplicates them under different wording — the opposite of this pack's zero-context-bloat pitch. The pointer block links to the canonical file instead; dedupe your existing prose against it yourself, on your own schedule.
+- **Doesn't ship memory hooks.** `memory/SPEC.md` is architecture + hook-event names + pseudocode only — working `.js` files are next-PR scope, not installed by this script.
+
+For Cursor/Codex, or if you'd rather not run a script: everything above still applies by hand — point `AGENTS.md`/`.cursor/rules/` at `rules/security-invariants.md`, reference `rules/engineering.md` + `rules/design-lane.md` + `skills/manifest.yaml`, and treat `memory/SPEC.md` as the memory-layer spec.
 
 ## Provenance
 
