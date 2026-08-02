@@ -16,9 +16,32 @@ fi
 # Window: 0%") but is actually just failed-parse zeros. That's worse than an
 # explicit error: 0% reads as a measurement, not as "unknown." Fail loud and
 # short instead.
+#
+# Found by testing (2026-08-02, second pass): `winget install jq` does not
+# reliably register PATH at all -- not a stale-shell caching issue, the User
+# and Machine PATH registry values never gained an entry, and winget's own
+# Links shim dir was empty. "Restart your terminal" does nothing in that
+# case. So before giving up, glob every user's WinGet package dir for jq.exe
+# and use it directly if found -- this covers any machine, not just one.
 if ! command -v jq >/dev/null 2>&1; then
-    printf "claude-harness statusline: jq not found on PATH — see statusline/README.md"
-    exit 0
+    # $LOCALAPPDATA is Windows-style (C:\Users\...) -- useless as a bash glob/find
+    # root directly. Convert with cygpath (ships with Git for Windows, in
+    # /usr/bin, so it survives a scrubbed PATH). Don't assume $HOME is
+    # POSIX-style either -- Claude Code spawns this as a non-login shell, and
+    # on machines with a redirected/AzureAD profile HOME can come through
+    # Windows-style too, so fall back to it only if cygpath is unavailable.
+    jq_base=$(cygpath -u "$LOCALAPPDATA" 2>/dev/null)
+    [ -z "$jq_base" ] && jq_base="$HOME/AppData/Local"
+    # `set -f` above disables globbing, so a `*` pattern here would pass through
+    # to find literally instead of expanding -- use -iname, not a glob, to search.
+    jq_fallback=$(find "$jq_base/Microsoft/WinGet/Packages" -maxdepth 1 -iname 'jqlang.jq_*' -exec test -x '{}/jq.exe' \; -print 2>/dev/null | head -n1)
+    [ -n "$jq_fallback" ] && jq_fallback="$jq_fallback/jq.exe"
+    if [ -n "$jq_fallback" ] && [ -x "$jq_fallback" ]; then
+        jq() { "$jq_fallback" "$@"; }
+    else
+        printf "claude-harness statusline: jq not found on PATH — see statusline/README.md"
+        exit 0
+    fi
 fi
 
 # ── Colors ──────────────────────────────────────────────
