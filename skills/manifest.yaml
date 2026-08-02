@@ -1,0 +1,596 @@
+# Claude Harness v5 skill manifest — portable contract
+#
+# No profile gates. `required: true` = always on for every session.
+# `required: false` + `trigger:` = activates on task shape, not a rigor dial.
+# Every non-bundled entry traces to a source verified in skills/RESEARCH.md
+# (fetched 2026-08-02, cross-checked twice) — no entry here should carry a
+# claim RESEARCH.md doesn't back up.
+
+version: "5.0.0-draft"
+
+skills:
+  # ── Engineering (always on) ────────────────────────────────────────────
+  - name: ponytail
+    role: "Core engineering — YAGNI ladder, root-cause fixes, minimal safe code"
+    required: true
+    source: "https://github.com/DietrichGebert/ponytail"
+    install: "npm package @dietrichgebert/ponytail, or native Claude Code skill file"
+    pin: "4.8.4"
+    stars: 93764
+    vet_date: "2026-08-02"
+    notes: >
+      Verified real (not vaporware) — SKILL.md read directly, ships a 7-rung
+      laziness ladder + lite/full/ultra intensity levels. Star velocity
+      (93.7k in ~7 weeks) RESOLVED 2026-08-02: organic — matches a real,
+      dated Hacker News front-page post (98 points, "Ponytail – make your AI
+      agent think like the laziest senior dev in the room", 2026-06-14),
+      smooth ramp-then-decay growth curve (Wayback-archived star counts,
+      not vertical cliffs), normal 5.5% fork ratio, diverse real stargazer
+      accounts. Star count is now a trustworthy signal, not just the content.
+      Known open Windows issues (#645, #646, DietrichGebert/ponytail) affect
+      the POSIX/WSL2 hook path only — the Windows-native hook variant is
+      separately guarded per the issue titles, low risk for this repo's
+      Git-Bash-on-Windows setup specifically.
+
+  - name: caveman
+    role: "Terse prose / token efficiency"
+    required: true
+    source: "bundled"
+    notes: "Already in use in this environment; no external research needed."
+
+  - name: rtk
+    role: "Terminal noise reduction for noisy CLI output"
+    required: false
+    trigger: "recommended"
+    source: "bundled"
+
+  - name: superpowers
+    role: "14-skill pack — TDD, systematic debugging, code review, planning, release hygiene (all advisory, not gated)"
+    required: false
+    trigger: "user requests test-first, debugging methodology, code review, or new-surface exploration"
+    source: "https://github.com/obra/superpowers"
+    marketplace: "https://github.com/obra/superpowers-marketplace"
+    install: "/plugin marketplace add obra/superpowers-marketplace"
+    stars: 264996
+    vet_date: "2026-08-02"
+    notes: >
+      Corrected 2026-08-02: ships 14 skills, not "20+". Engineering-relevant:
+      systematic-debugging (4-phase root-cause methodology — the manifest's
+      answer to "no debugging skill"), test-driven-development,
+      receiving-code-review, requesting-code-review,
+      subagent-driven-development, verification-before-completion,
+      writing-plans, finishing-a-development-branch, using-git-worktrees.
+      3 sub-plugins (elements-of-style, superpowers-developing-for-claude-code,
+      private-journal-mcp) are WATCH — no LICENSE file confirmed.
+
+  - name: debug-skill
+    role: "Real debugger mechanism (DAP breakpoints/stepping/locals) — complements superpowers' systematic-debugging methodology"
+    required: false
+    trigger: "debugging + language has a DAP-compatible debugger"
+    source: "https://github.com/AlmogBaku/debug-skill"
+    stars: 310
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Mechanism layer, not a replacement for systematic-debugging (that's methodology). Pair them."
+
+  - name: security-audit
+    role: "Pre-merge read-only security review"
+    required: false
+    trigger: "security"
+    source: "bundled"
+    notes: "Maps to retained /security-review and /security-spec commands — see CLAUDE_HARNESS_ANALYSIS.md §0."
+
+  - name: code-simplifier
+    role: "First-party Anthropic post-edit cleanup agent — scoped to recently-modified code"
+    required: false
+    trigger: "opt-in only — see conflict note, do not pair with ponytail by default"
+    source: "https://github.com/anthropics/claude-plugins-official"
+    stars: 32965
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: >
+      CORRECTED 2026-08-02 — downgraded from "ship both with ponytail."
+      Real, documented duplicate-ownership conflict: a third-party Claude
+      Code config curator explicitly dropped code-simplifier in favor of
+      ponytail to resolve two tools competing for the same "simplify" job
+      (bernatmv/ai-rules PR #9, merged). Neither project is aware of the
+      other in its own docs. Also carries its own open quality issues:
+      alters string literals (anthropics/claude-plugins-official#208),
+      rewrites prompts/markdown out of scope (#297), ships ES-specific
+      instructions not generic to other languages (#204). Recommendation:
+      ponytail is the default simplification pass; treat code-simplifier as
+      an alternative to try instead of, not alongside, ponytail — pick one.
+
+  # ── Code review (pick a default — see notes; not mutually exclusive) ───
+  - name: coderabbit
+    role: "AI PR/IDE/CLI code review — default pick"
+    required: false
+    trigger: "pre-merge, or user runs /review-loop"
+    source: "https://www.coderabbit.ai/"
+    plugin_repo: "https://github.com/coderabbitai/claude-plugin"
+    install: "/plugin install coderabbit (requires separate CodeRabbit CLI + auth)"
+    stars: 54
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: >
+      RECOMMENDED DEFAULT — this is what the founder's own /review-loop skill
+      already depends on outside this repo. Confirmed live: $88M raised,
+      15,000+ customers claimed, free tier exists. 32,361 installs on
+      claude.com/plugins.
+
+  - name: qodo
+    role: "AI PR review — alternative with self-hostable OSS core"
+    required: false
+    trigger: "alternative to coderabbit"
+    source: "https://www.qodo.ai/"
+    oss_core: "https://github.com/The-PR-Agent/pr-agent"
+    stars: 12333
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Best pick for teams wanting to avoid hosted-only vendor lock-in — PR-Agent core is self-hostable with your own LLM keys."
+
+  - name: greptile
+    role: "AI PR review — full-codebase-indexing, catches cross-file breakage"
+    required: false
+    trigger: "alternative to coderabbit, or cross-file-bug-prone changes"
+    source: "https://www.greptile.com/"
+    stars: null
+    license: "proprietary"
+    vet_date: "2026-08-02"
+    notes: "56,611 installs on claude.com/plugins (highest of the 3 review tools). Free tier: 50 reviews/mo."
+
+  - name: anthropic-code-review
+    role: "First-party multi-agent PR review — zero third-party vendor"
+    required: false
+    trigger: "alternative to coderabbit, no-vendor requirement"
+    source: "https://github.com/anthropics/claude-plugins-official"
+    notes: "code-review + pr-review-toolkit plugins — confidence-scored review, dedicated comment/test/error-handling/type-design agents."
+
+  # ── Static analysis (agent-facing layer, beyond raw CI Semgrep) ────────
+  - name: semgrep-guardian
+    role: "Official real-time post-edit Semgrep scanning — regenerate-until-clean loop"
+    required: false
+    trigger: "NOT RECOMMENDED on Windows — see notes. macOS/Linux: ui|api|auth surfaces, or always-on for security-sensitive repos"
+    source: "https://github.com/semgrep/guardian"
+    distributed_via: "https://github.com/anthropics/claude-plugins-official"
+    stars: 10
+    vet_date: "2026-08-02"
+    notes: >
+      DOWNGRADED 2026-08-02 after adversarial review, three real findings:
+      (1) Confirmed broken on native Windows — hook binary silently returns
+      `{}` on every event, no findings ever fire, no cache written
+      (semgrep/guardian#59, open); separately crashes with a path error
+      when the project is on a different drive than the plugin
+      (semgrep/guardian#60, open). This machine is Windows — do not install.
+      (2) Contradicts this manifest's "no mechanical gates" premise: its
+      hooks.json (fetched directly) registers a PreToolUse hook on
+      Write|Edit|Bash — architecturally the same blocking primitive as the
+      demolished phase-gate.js (exit 2 blocks the tool call). The
+      advisory "regenerate until clean" behavior lives in PostToolUse
+      (non-blocking, fine); the PreToolUse hook's actual behavior is an
+      undocumented compiled Go binary — cannot verify it isn't gating.
+      (3) Ships a skill literally named `semgrep`, identical to
+      trailofbits-static-analysis's skill of the same name — Trail of
+      Bits' own PR (#33, closed unmerged) proves this exact name collision
+      causes silent skill-shadowing in Claude Code. Do not install both.
+      Given (1)-(3): trailofbits-static-analysis is the safer default for
+      this environment.
+
+  - name: trailofbits-static-analysis
+    role: "Deeper CodeQL + Semgrep + SARIF triage, with true/false-positive classification — RECOMMENDED DEFAULT for this environment"
+    required: false
+    trigger: "security-sensitive repos wanting CodeQL + Semgrep triage. Do not combine with semgrep-guardian — see collision note."
+    source: "https://github.com/trailofbits/skills"
+    stars: 6393
+    license: "CC-BY-SA-4.0 (unusual for code — check compatibility before adopting)"
+    vet_date: "2026-08-02"
+    notes: >
+      Real independent security research firm (Trail of Bits). Triage
+      subagent reads source to classify findings, not just runs the tool.
+      Promoted to recommended default 2026-08-02: no confirmed Windows
+      breakage found (one prior Windows bug, colon-in-filename, already
+      fixed — trailofbits/skills#51/#52), versus semgrep-guardian's two
+      open, unfixed Windows bugs. Ships a skill named `semgrep` — same name
+      as semgrep-guardian's; do not install both (see semgrep-guardian
+      notes for the collision evidence).
+
+  # ── Dependency / tech-debt ──────────────────────────────────────────────
+  - name: managing-dependencies
+    role: "Dependency hygiene beyond raw npm audit/pip-audit — typosquatting, ecosyste.ms package-quality signals, lockfile-injection awareness"
+    required: false
+    trigger: "adding or updating a dependency"
+    source: "https://github.com/andrew/managing-dependencies"
+    stars: 16
+    license: "CC0-1.0"
+    vet_date: "2026-08-02"
+    notes: "Author is Andrew Nesbitt, creator of libraries.io/ecosyste.ms — genuine domain authority despite low star count."
+
+  # ── Performance ─────────────────────────────────────────────────────────
+  - name: codspeed-optimize
+    role: "Real perf regression detection via CI benchmark comparison + flamegraph MCP tools"
+    required: false
+    trigger: "perf-sensitive-work"
+    source: "https://github.com/CodSpeedHQ/codspeed"
+    stars: 239
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: "Only candidate found with a real baseline-vs-current regression surface, not just 'invoke a profiler and eyeball it'."
+
+  # ── Commit / PR lifecycle ───────────────────────────────────────────────
+  - name: compound-engineering-plugin
+    role: "Commit -> push -> PR -> babysit-CI -> resolve-feedback -> release-notes lifecycle automation"
+    required: false
+    trigger: "recommended"
+    source: "https://github.com/EveryInc/compound-engineering-plugin"
+    stars: 23698
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Whole commit-to-announce loop, not just message formatting. Fast star growth flagged but fork ratio (12.4:1) is healthy."
+
+  # ── Planning (lighter alternative to spec-kit — see rules/engineering.md,
+  #    WORKFLOW.md "Plan" step) ─────────────────────────────────────────────
+  - name: grill-me
+    role: "Pre-implementation interview to sharpen a plan/design before writing code"
+    required: false
+    trigger: "non-trivial task, before implementation — align on approach"
+    source: "https://github.com/mattpocock/skills/tree/main/skills/productivity/grill-me"
+    stars: 199684
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: >
+      Whole-repo stats (mattpocock/skills), 17,218 forks (healthy ~8.6%
+      ratio), official Claude Code marketplace plugin, pushed same day as
+      vetting. Skill itself is three sentences — confirmed via direct raw
+      fetch. Fills a real gap: nothing else in this manifest forces an
+      explicit alignment step before implementation starts.
+
+  - name: to-spec
+    role: "Synthesize conversation + codebase exploration into a formal spec, grounded in real code state"
+    required: false
+    trigger: "large-feature — lighter alternative to spec-kit"
+    source: "https://github.com/mattpocock/skills/tree/main/skills/engineering/to-spec"
+    stars: 199684
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Same repo as grill-me. Explores the repo and sketches test seams before writing the spec; user-story-centric template."
+
+  - name: to-tickets
+    role: "Break a spec into independent, parallel-safe Kanban tickets (vertical slices, explicit blocking edges)"
+    required: false
+    trigger: "large-feature — pairs with to-spec"
+    source: "https://github.com/mattpocock/skills/tree/main/skills/engineering/to-tickets"
+    stars: 199684
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Same repo as grill-me/to-spec. Vertical-slice tickets with blocking relationships, built to enable parallel agent work."
+
+  - name: mattpocock-tdd
+    role: "Alternative TDD skill — evaluated against superpowers, NOT adopted as the default"
+    required: false
+    trigger: "not adopted — see notes; superpowers test-driven-development is the pick"
+    source: "https://github.com/mattpocock/skills/tree/main/skills/engineering/tdd"
+    stars: 199684
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: >
+      Head-to-head read of both full skills (SKILL.md + reference files,
+      ~150 lines here vs. superpowers' ~350). superpowers wins on the
+      criteria that matter most for an autonomous agent: mandatory
+      verify-red/verify-green with literal commands, a 10-item
+      rationalization-rebuttal table aimed at agent shortcut-taking under
+      pressure, gate-function pre-write checklists, and a mutation-check
+      correctness bar — none of which this skill has. Two ideas from this
+      skill ARE grafted into rules/engineering.md instead of adopting the
+      whole thing: pre-agreed test seams (confirm the public boundary with
+      the user before writing tests) and mockability-by-design (dependency
+      injection, SDK-style interfaces over generic fetchers). See
+      rules/engineering.md "Designing for testability".
+
+  - name: improve-codebase-architecture
+    role: "Identify structural confusion, propose module-deepening opportunities to make code more agent-friendly"
+    required: false
+    trigger: "architecture review, unclear module boundaries, tightly-coupled code"
+    source: "https://github.com/mattpocock/skills/tree/main/skills/engineering/improve-codebase-architecture"
+    stars: 199684
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Same repo as grill-me. Genuinely net-new capability — nothing else in this manifest reviews architecture/module boundaries; ponytail is simplicity-per-change, not structural."
+
+  # ── Marketplace reference (not a skill itself) ──────────────────────────
+  - name: claude-plugins-official
+    role: "Anthropic's own live-updated plugin marketplace — canonical source for several picks above"
+    required: false
+    trigger: "reference"
+    source: "https://github.com/anthropics/claude-plugins-official"
+    stars: 32965
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: "Independently corroborates superpowers' legitimacy (listed here). Hosts code-review, pr-review-toolkit, code-simplifier, code-modernization, commit-commands, claude-security, security-guidance, semgrep-guardian."
+
+  # ── Design (triggered by UI task shape) ────────────────────────────────
+  - name: ui-ux-pro-max
+    role: "Design intelligence, a11y, anti-slop review against design system"
+    required: false
+    trigger: "ui"
+    source: "bundled"
+    notes: "Already available as a Claude Code skill in this environment."
+
+  - name: impeccable
+    role: "Anti-slop design skill — polish/audit/critique/distill/animate + CI-hookable detect rules"
+    required: false
+    trigger: "ui"
+    source: "https://github.com/pbakaus/impeccable"
+    stars: 53936
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: "Primary anti-slop pick over hallmark — broader command set, CI-hookable detect CLI."
+
+  - name: hallmark
+    role: "Anti-slop design skill — 22 themes, 65 slop-test gates"
+    required: false
+    trigger: "ui"
+    source: "https://github.com/Nutlope/hallmark"
+    stars: 20744
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Overlaps with impeccable — kept as secondary/reference, not both required."
+
+  - name: shadcn-mcp
+    role: "Component search against any shadcn-compatible registry"
+    required: false
+    trigger: "ui"
+    source: "https://ui.shadcn.com/docs/registry/mcp"
+    backing_repo: "https://github.com/shadcn-ui/ui"
+    stars: 120324
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Native to shadcn CLI 3.0 — supersedes third-party shadcn-ui-mcp-server forks."
+
+  - name: kokonutui
+    role: "shadcn-registry component set — general UI (Tailwind + shadcn/ui + Motion)"
+    required: false
+    trigger: "ui"
+    source: "https://github.com/kokonut-labs/kokonutui"
+    registry_namespace: "https://kokonutui.com/r/{name}.json"
+    stars: 1987
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Installs through the existing shadcn-mcp/CLI mechanism — not a separate tool category. Vercel OSS 2025 Program sponsor."
+
+  - name: bklit-ui
+    role: "shadcn-registry component set — charts & data visualization"
+    required: false
+    trigger: "ui + data-viz"
+    source: "https://github.com/bklit/bklit-ui"
+    registry_namespace: "https://ui.bklit.com/r/{name}.json"
+    stars: 1416
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Same shadcn-registry install path as kokonutui. Complements the bundled dataviz skill for chart-heavy UI work."
+
+  - name: figma-mcp
+    role: "Figma Dev Mode MCP — design file inspection"
+    required: false
+    trigger: "ui + figma-file-present"
+    source: "https://github.com/figma/mcp-server-guide"
+    stars: 1837
+    license: "none set — confirm before redistribution"
+    vet_date: "2026-08-02"
+    notes: "Server itself is closed-source, ships in Figma desktop app, requires Dev/Full seat on Professional plan."
+
+  - name: playwright-mcp
+    role: "Browser automation for UI regression / verify step evidence"
+    required: false
+    trigger: "ui"
+    source: "https://github.com/microsoft/playwright-mcp"
+    stars: 35742
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: "Official Microsoft MCP, accessibility-tree driven, no vision model required."
+
+  - name: playwright
+    role: "E2E regression on critical UI paths"
+    required: false
+    trigger: "project e2e"
+    source: "project install"
+
+  # ── Spec / planning (large features only) ──────────────────────────────
+  - name: spec-kit
+    role: "Heavy planning for large features only — spec/plan/tasks templates"
+    required: false
+    trigger: "large-feature"
+    source: "https://github.com/github/spec-kit"
+    stars: 124980
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: >
+      WATCH per RESEARCH.md — 4-stage ceremony reintroduces the gating
+      Claude Harness v5 is removing. Cherry-pick spec/plan templates only; do not
+      wire the full gate-driven workflow.
+
+  # ── Memory (see memory/SPEC.md for the default; this entry documents the
+  #    optional power-user path only — NOT installed by default) ─────────
+  - name: claude-mem
+    role: "Optional semantic-recall memory MCP — power-user adapter only"
+    required: false
+    trigger: "opt-in only, never default"
+    source: "https://github.com/thedotmack/claude-mem"
+    stars: 89305
+    license: "Apache-2.0"
+    vet_date: "2026-08-02"
+    notes: >
+      REJECT as a default/required install. Maintainer-endorsed
+      cryptocurrency token + curl-pipe-bash installer are real supply-chain
+      and governance red flags — see RESEARCH.md. If the pattern is wanted,
+      prefer obra/private-journal-mcp instead (no such red flags).
+
+  - name: session-memory
+    role: "Automatic dual-scope checkpoint + compact pattern (v5 default memory layer)"
+    required: true
+    source: "bundled — see memory/SPEC.md"
+    notes: "File-based hooks, no daemon, no manual /compact. This is the shipped default, not claude-mem."
+
+  # ── Mistake-memory (self-learning) — reference architectures only, see
+  #    memory/SPEC.md "Mistake-memory" section for the actual shipped design.
+  #    Neither of these two is installed; they're cited for their file/data
+  #    layout, not adopted wholesale. Full research: skills/RESEARCH.md §9. ──
+  - name: retro-skill
+    role: "Reference architecture — post-hoc transcript classification into 6 destinations, index-then-detail storage"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/netresearch/retro-skill"
+    stars: 3
+    license: "NOASSERTION per gh api; README badge claims MIT AND CC-BY-SA-4.0 — discrepancy recorded, not resolved"
+    vet_date: "2026-08-02"
+    notes: >
+      Closest real match for the no-bloat, index-then-detail shape v5's
+      mistake-memory design uses. Its README documents real failure data
+      from a predecessor continuous-hook "Coach" plugin: 1011 pending / 0
+      approved / 0 rejected candidates, 35MB events.sqlite, ~35x duplicate
+      fingerprints — the empirical case for detection at correction-time,
+      not via background hooks. Its per-proposal human-approval gate is
+      NOT adopted — contradicts the founder's explicit "fully automatic"
+      requirement; v5's design keeps the skepticism agent-side instead.
+
+  - name: claude-memory-skill
+    role: "Reference architecture — core.md index + topics/*.md detail-on-demand file layout"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/hanfang/claude-memory-skill"
+    stars: 46
+    vet_date: "2026-08-02"
+    notes: "Plain git-trackable markdown, no daemon/DB. This is the file-layout model for v5's mistake-memory storage — always-loaded index, full detail read only on demand."
+
+  - name: claude-reflect
+    role: "Cautionary example — real automatic correction-detection, fails BOTH no-bloat AND fully-automatic requirements"
+    required: false
+    trigger: "do not install — see notes"
+    source: "https://github.com/BayramAnnakov/claude-reflect"
+    stars: 1281
+    vet_date: "2026-08-02"
+    notes: >
+      CORRECTED 2026-08-02 (v2 memory pass, skills/RESEARCH.md §11). Regex +
+      AI-validated correction capture genuinely works, but two separate
+      problems, not one: (1) writes land in CLAUDE.md/AGENTS.md, loaded in
+      full every session (mitigated only by dedup/decay scoring, not
+      lazy-loading); (2) confirmed via raw fetch of commands/reflect.md —
+      every captured item still goes through a human [a]pprove | [e]dit |
+      [s]kip gate in /reflect, just batched later instead of per-proposal.
+      Does not solve "fully automatic + non-human skepticism" any better
+      than retro-skill did. Named here as both the context-bloat AND the
+      approval-gate failure modes this project's mistake-memory design
+      avoids.
+
+  - name: claude-memory-compiler
+    role: "Reference architecture — SessionStart hook injecting a compiled cross-session knowledge index"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/coleam00/claude-memory-compiler"
+    stars: 1265
+    vet_date: "2026-08-02"
+    notes: "Real, working prior art for the lessons-index injection mechanism this project's mistake-memory design was missing — hooks/session-start.py confirmed present. Validates reusing the same SessionStart hook already spec'd for checkpoints rather than inventing a second one."
+
+  - name: agentmemory
+    role: "Reference architecture — priority-ordered char-budget retrieval, truncate-from-start once over budget"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/jayzeng/agentmemory"
+    stars: 13
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Targets Claude Code + Codex + Cursor explicitly, matching this project's own portability requirement. design.md confirmed via raw fetch: 16K total context budget, sections built in priority order, truncated from the start once over budget. Adopted as the pattern for bounding the lessons index past ~50 entries."
+
+  - name: mnem
+    role: "Reference architecture — inline strikethrough supersession in plain markdown, no delete"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/JustVugg/mnem"
+    stars: 44
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Supersede old lesson text in place (~~struck~~ + HTML-comment timestamp/reason) instead of deleting — keeps history git-diffable, no second file. Adopted for lesson supersession in memory/SPEC.md."
+
+  - name: mclaude
+    role: "Reference architecture — lockfile + atomic-replace concurrency pattern, Windows-tested"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/AnastasiyaW/mclaude"
+    stars: 6
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "O_CREAT|O_EXCL lockfile + stale-lock timeout for mutex, append-only shared logs, atomic rename for periodic-write files. Explicitly tested on Windows 10/11 per its own README. Adopted for checkpoint.md's read-modify-write concurrency risk — the one file in this design with real race exposure."
+
+  - name: claude-memory-loops
+    role: "Reference architecture — correction-detection false-positive filtering (no approval gate, no skepticism step either)"
+    required: false
+    trigger: "reference only — not installed"
+    source: "https://github.com/texastoast/claude-memory-loops"
+    stars: 0
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Confirmed real via gh api despite the low star count — code verified directly (lib/correction.mjs). Strips quoted/code blocks before treating text as a correction, requires a weak cue word to co-occur with a directive verb in the same sentence, not just anywhere in the message. Adopted these filters as explicit pre-write tests in memory/SPEC.md's criticality gate — but note it has no approval gate AND no skepticism step of its own; it trusts the model to write whatever it decides once past the filters. Filters only, not a full criticality model."
+
+  - name: pro-workflow
+    role: "Cautionary example — /learn-rule correction capture, fails no-bloat requirement"
+    required: false
+    trigger: "do not install — see notes"
+    source: "https://github.com/rohitg00/pro-workflow"
+    stars: 2753
+    vet_date: "2026-08-02"
+    notes: "Own README states learnings load in full at SessionStart — same failure mode as claude-reflect, at higher star count. Not adopted."
+
+unverified_excluded:
+  - name: anti-ui-slop
+    reason: "No canonical fetchable GitHub repo found — only a third-party curated-list PR and marketing pages. Excluded until a real source repo surfaces."
+  - name: design-tokens-mcp
+    reason: "No candidate clears an official/high-trust bar (best found: 4-25 stars, inconsistent maintenance). Open gap, not a solved category."
+
+# Libraries, not skills: no agent-installable wrapper exists, so they don't
+# get a `skills:` entry — an agent imports/writes code against them like any
+# other dependency. Referenced as recommended patterns in rules/design-lane.md.
+watched_libraries:
+  - name: anime.js
+    source: "https://github.com/juliangarnier/anime"
+    stars: 71698
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "Actively maintained JS animation engine. No Claude Code skill wrapper found — WATCH until one exists."
+  - name: motion
+    source: "https://github.com/motiondivision/motion"
+    stars: 33048
+    license: "MIT"
+    vet_date: "2026-08-02"
+    notes: "React/JS animation lib (formerly Framer Motion). kokonutui is built on it. No skill wrapper found — WATCH."
+
+# Adversarial critical-review pass, 2026-08-02 (advisor-directed, 3 background
+# agents, findings spot-checked directly by hand against gh api / raw source
+# before being trusted — one agent citation was caught as fabricated and
+# excluded). Full trail in skills/RESEARCH.md §8. Kept here so these don't
+# get silently re-broken by a future manifest edit.
+known_issues:
+  - entry: "code-simplifier"
+    issue: "Duplicate-ownership conflict with ponytail — see code-simplifier's own notes above."
+  - entry: "semgrep-guardian"
+    issue: "Broken on Windows (#59, #60), architecturally a mechanical gate (PreToolUse hook), name-collides with trailofbits-static-analysis. See notes above."
+  - entry: "superpowers"
+    issue: "Cosmetic, non-blocking SessionStart error on Windows (obra/superpowers#1554, open)."
+  - entry: "memory layer (memory/SPEC.md)"
+    issue: >
+      SessionEnd — the hook the global-scope rotation design depends on —
+      is confirmed to NOT fire on the `/exit` command (the standard way to
+      end a session). anthropics/claude-code#35892, closed `not_planned`
+      (permanent, not a bug awaiting a fix). This breaks "global scope:
+      rotate live checkpoint to archive on SessionEnd" for the common case.
+      Needs a redesign: check checkpoint staleness at SessionStart instead
+      of relying on SessionEnd firing. See memory/SPEC.md for the fix.
+
+# Confirmed real, actively reviewed, and rejected — kept here so a future
+# pass doesn't re-litigate these without cause. See skills/RESEARCH.md §6
+# for full rationale.
+reviewed_rejected:
+  - name: brik-ai
+    source: "https://brik.space"
+    reason: "Proprietary, fully client-rendered SPA, zero API/MCP/CLI surface. Produces visual assets, not code — human-only design tool."
+  - name: wevi.ai
+    source: "https://wevi.ai"
+    reason: "Pre-launch (email-signup only), proprietary, zero API/MCP/CLI surface, thin credibility signals."
