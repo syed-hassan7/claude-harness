@@ -77,6 +77,51 @@ else
   echo "[claude-harness] memory hooks NOT installed (default). Re-run with --with-memory-hooks to add them."
 fi
 
+# --- 1b. Caveman ultra: default-on communication style, always installed ---
+# Not opt-in like memory hooks -- this is the harness's baseline communication
+# mode. Ships the hook pair (SessionStart ruleset injection + UserPromptSubmit
+# per-turn reinforcement) plus its config resolver and skill source, and seeds
+# the default-mode config file to "ultra" if the user has no config yet.
+# Existing user config/flag state is never overwritten -- this only sets a
+# default where none exists, same idempotence contract as the rest of this
+# script.
+rm -rf "$PACK_DIR/caveman"
+cp -r "$REPO_DIR/caveman" "$PACK_DIR/caveman"
+echo "[claude-harness] caveman hooks synced to $PACK_DIR/caveman"
+
+CAVEMAN_CONFIG_DIR="${XDG_CONFIG_HOME:-}"
+if [ -n "$CAVEMAN_CONFIG_DIR" ]; then
+  CAVEMAN_CONFIG_DIR="$CAVEMAN_CONFIG_DIR/caveman"
+elif [ -n "${APPDATA:-}" ]; then
+  CAVEMAN_CONFIG_DIR="$APPDATA/caveman"
+else
+  CAVEMAN_CONFIG_DIR="$HOME/.config/caveman"
+fi
+CAVEMAN_CONFIG_DIR="${CAVEMAN_CONFIG_DIR//\\//}"
+CAVEMAN_CONFIG_FILE="$CAVEMAN_CONFIG_DIR/config.json"
+if [ ! -f "$CAVEMAN_CONFIG_FILE" ]; then
+  mkdir -p "$CAVEMAN_CONFIG_DIR"
+  echo '{ "defaultMode": "ultra" }' > "$CAVEMAN_CONFIG_FILE"
+  echo "[claude-harness] caveman default mode set to ultra at $CAVEMAN_CONFIG_FILE"
+else
+  echo "[claude-harness] caveman config already exists at $CAVEMAN_CONFIG_FILE — left as-is"
+fi
+
+PACK_DIR_DISP_PRE="$(win_path "$PACK_DIR")"
+if [ -f "$CLAUDE_DIR/settings.json" ] && grep -q 'caveman-activate.js' "$CLAUDE_DIR/settings.json"; then
+  echo "[claude-harness] caveman hooks already wired in settings.json"
+else
+  cat <<EOF
+[claude-harness] Add this to ~/.claude/settings.json under "hooks" (MERGE into
+existing arrays, don't replace them):
+  "SessionStart":     [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP_PRE/caveman/hooks/caveman-activate.js\"", "timeout": 5 }] }]
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP_PRE/caveman/hooks/caveman-mode-tracker.js\"", "timeout": 5 }] }]
+Without this, the default-mode config above is inert -- these two hooks are what
+actually inject the ruleset and reinforce it every turn. Override anytime by
+saying "stop caveman" / "normal mode" in chat, or editing $CAVEMAN_CONFIG_FILE.
+EOF
+fi
+
 # --- 2. Statusline: dictated path, safe to copy directly ---
 mkdir -p "$CLAUDE_DIR"
 if [ ! -f "$CLAUDE_DIR/statusline.sh" ] || ! cmp -s "$REPO_DIR/statusline/statusline.sh" "$CLAUDE_DIR/statusline.sh"; then
@@ -112,6 +157,7 @@ BLOCK_FILE="$(mktemp)"
   echo "- Engineering rules (YAGNI ladder, debugging, review, deps, perf, commit lifecycle): \`$PACK_DIR_DISP/rules/engineering.md\`"
   echo "- Design lane (triggered on UI/UX task shape): \`$PACK_DIR_DISP/rules/design-lane.md\`"
   echo "- Skills manifest (install/version source of truth): \`$PACK_DIR_DISP/skills/manifest.yaml\`"
+  echo "- Communication default (caveman ultra, always-on unless you say \"stop caveman\"/\"normal mode\"): \`$PACK_DIR_DISP/caveman/skills/caveman/SKILL.md\`, config \`$CAVEMAN_CONFIG_FILE\`"
   echo "- $MEMORY_LINE"
   echo "- Workflow loop (Understand -> Plan -> Build -> Verify -> Security-if-needed): \`$PACK_DIR_DISP/WORKFLOW.md\`"
   echo "$MARKER_END"

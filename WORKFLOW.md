@@ -8,6 +8,10 @@ Understand → Plan → Build → Verify → Security-if-needed
 
 Any step can be revisited. There is no "phase" stored anywhere that prevents moving backward, skipping a step that doesn't apply, or doing two steps in one turn.
 
+## Communication baseline
+
+Caveman ultra is the default communication style across this whole loop — not a step, a standing default (see `skills/manifest.yaml`'s `caveman` entry, `caveman/skills/caveman/SKILL.md`). Terse, fragment-ok, no filler, arrows for causality. It stays on by default across sessions (`install.sh` seeds `defaultMode: ultra`), but two things override it: the Auto-Clarity carve-out (security warnings, irreversible-action confirmations render in plain language, then resume) and an explicit "stop caveman"/"normal mode" from the user. Code, commits, and PR text are always written in normal prose regardless of mode.
+
 ## Understand
 
 - Read the relevant code before proposing a change. Reuse existing functions/utilities/patterns — see `rules/engineering.md`'s YAGNI ladder.

@@ -33,10 +33,23 @@ skills:
       Git-Bash-on-Windows setup specifically.
 
   - name: caveman
-    role: "Terse prose / token efficiency"
+    role: "Terse prose / token efficiency — default communication style for every session"
     required: true
-    source: "bundled"
-    notes: "Already in use in this environment; no external research needed."
+    source: "shipped in this repo — caveman/hooks/, caveman/skills/caveman/SKILL.md"
+    install: "install.sh copies the hook pair + skill source and seeds ~/.config/caveman (or %APPDATA%/caveman) config.json to {\"defaultMode\":\"ultra\"} if no config exists. Wiring the two hooks (SessionStart caveman-activate.js, UserPromptSubmit caveman-mode-tracker.js) into settings.json is printed, not auto-applied — same non-destructive JSON policy as the memory hooks."
+    notes: >
+      Default-on decision recorded 2026-08-03: default mode is ULTRA, not the
+      caveman project's own upstream default of "full" — this manifest
+      overrides that via the seeded config.json. Two things are deliberately
+      kept, not stripped, when making ultra the default: (1) the Auto-Clarity
+      carve-out (security warnings / irreversible-action confirmations still
+      render in plain language, then resume caveman) and (2) the explicit
+      "stop caveman"/"normal mode" chat override. Both were confirmed with
+      the founder before locking this in — "never comes off" here means
+      "default-on and persists across sessions without silently drifting back
+      to full/off," not "cannot be turned off by explicit request." Do not
+      relitigate without re-confirming — this reverses a real ask to make it
+      literally unstoppable.
 
   - name: rtk
     role: "Terminal noise reduction for noisy CLI output"
