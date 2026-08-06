@@ -114,6 +114,22 @@ skills:
     source: "bundled"
     notes: "Locally installed at ~/.claude/skills/tender-pdf — not researched/vetted in skills/RESEARCH.md, documented here for manifest accuracy only."
 
+  - name: pdf-inspect
+    role: "Local PDF classification (text/scanned/image/mixed) + position-aware text extraction + Markdown conversion — no OCR, no network calls"
+    required: false
+    trigger: "PDF extraction produces garbled/empty text, OCR-vs-direct-parse routing decisions, or need position-aware (font + X/Y) PDF text extraction"
+    source: "https://github.com/firecrawl/pdf-inspector"
+    install: "Node/TS projects: npm install @firecrawl/pdf-inspector (prebuilt napi-rs binaries, no toolchain needed). CLI (pdf2md/detect-pdf): cargo install pdf-inspector — no prebuilt release binaries upstream, requires a Rust toolchain; skill asks before installing anything, never auto-installs."
+    license: "MIT"
+    vet_date: "2026-08-06"
+    notes: >
+      Real, actively maintained — backed by Firecrawl, MIT, single Rust
+      dependency (lopdf), no network calls, no ML models. Node package's own
+      README undercounts its exports vs napi/src/lib.rs — verify against the
+      installed package's index.d.ts before coding against it, not README
+      prose. CLI has no prebuilt release binaries — cargo install compiles
+      from source; do not assume pre-installed on any given machine.
+
   - name: code-simplifier
     role: "First-party Anthropic post-edit cleanup agent — scoped to recently-modified code"
     required: false
