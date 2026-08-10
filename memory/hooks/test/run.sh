@@ -60,7 +60,7 @@ export CLAUDE_HARNESS_HOME_OVERRIDE="$FAKE_HOME"
 # already has content from genuine usage before this suite even starts. An
 # existence check can't tell "this run polluted it" from "was already there";
 # a before/after diff can.
-PRE_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)"
+PRE_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true
 
 PASS_COUNT=0
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); echo "PASS: $1"; }
@@ -310,7 +310,7 @@ pass "MAX_FILES=50 correctly trims to the newest 50 entries"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
-POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)"
+POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true
 if ! NEW_PATHS="$(comm -13 <(printf '%s\n' "$PRE_SESSION_SNAPSHOT") <(printf '%s\n' "$POST_SESSION_SNAPSHOT"))"; then
   fail "could not compare real ~/.claude/session snapshots -- comm itself failed, this check did not run"
 fi
