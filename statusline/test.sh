@@ -26,14 +26,27 @@ fail() { echo "FAIL: $1"; exit 1; }
 PAYLOAD='{"model":{"display_name":"Sonnet 5"},"context_window":{"context_window_size":200000,"current_usage":{"input_tokens":40000,"cache_creation_input_tokens":5000,"cache_read_input_tokens":23000}},"cwd":"/tmp","session":{"start_time":"2026-08-02T19:00:00Z"}}'
 
 echo "=== Test: jq truly absent (PATH scrubbed, no WinGet fallback dir) -> honest error ==="
-# Scrub PATH down to just what's needed to run bash itself, AND point HOME at
-# an empty temp dir so the WinGet-package fallback search also finds nothing
-# -- otherwise this test would pass or fail depending on whether the machine
-# running it happens to have jq installed via winget, which defeats the point.
+# Point HOME at an empty temp dir so the WinGet-package fallback search also
+# finds nothing -- otherwise this test would pass or fail depending on
+# whether the machine running it happens to have jq installed via winget,
+# which defeats the point.
 FAKE_HOME="$SCRIPT_DIR/.test-fake-home"
 mkdir -p "$FAKE_HOME"
+# Scrub jq out of PATH -- NOT by hardcoding a minimal PATH string. A fixed
+# "/usr/bin:/bin" was tried first and passed on this dev machine, then failed
+# outright on GitHub's ubuntu-latest runner, which ships a real jq at
+# /usr/bin/jq by default -- the hardcoded "minimal" PATH still had it. Filter
+# the REAL PATH instead: drop every directory that itself contains an
+# executable jq, keep everything else needed (date/git/stat/etc) intact. This
+# is the one thing that's actually platform-agnostic about "jq is absent".
+SCRUBBED_PATH=""
+IFS=':' read -ra _path_dirs <<< "$PATH"
+for _dir in "${_path_dirs[@]}"; do
+  [ -x "$_dir/jq" ] && continue
+  SCRUBBED_PATH="${SCRUBBED_PATH:+$SCRUBBED_PATH:}$_dir"
+done
 set +e
-OUT=$(echo "$PAYLOAD" | PATH="/usr/bin:/bin" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local" 2>/dev/null)" bash "$STATUSLINE" 2>"$SCRIPT_DIR/.test-stderr")
+OUT=$(echo "$PAYLOAD" | PATH="$SCRUBBED_PATH" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local" 2>/dev/null)" bash "$STATUSLINE" 2>"$SCRIPT_DIR/.test-stderr")
 CODE=$?
 set -e
 ERR=$(cat "$SCRIPT_DIR/.test-stderr")
