@@ -72,6 +72,23 @@ run_hook() {
   (cd "$cwd" && echo "$json" | node "$HOOKS/$script")
 }
 
+# Portable "set this file's mtime N seconds in the past". `touch -d "10 days
+# ago"`/`touch -d "@<epoch>"` are GNU-only -- BSD/macOS touch's `-d` (where it
+# exists at all) wants a strict timestamp, not a relative string or an `@`
+# epoch prefix, and rejects both with "illegal time specification" (found via
+# this suite's first real macOS CI run -- never caught on this dev machine,
+# which only ever runs GNU-ish touch under Git Bash). `touch -t
+# [[CC]YY]MMDDhhmm[.SS]` is the one format both implementations honor
+# identically, so compute the epoch portably (same BSD `-j -r` / GNU `-d "@"`
+# split already used by statusline.sh's iso_to_epoch) and always call touch
+# through that one path.
+touch_seconds_ago() {
+  local seconds="$1" file="$2" target_epoch stamp
+  target_epoch=$(( $(date +%s) - seconds ))
+  stamp=$(date -j -r "$target_epoch" +%Y%m%d%H%M.%S 2>/dev/null) || stamp=$(date -d "@$target_epoch" +%Y%m%d%H%M.%S)
+  touch -t "$stamp" "$file"
+}
+
 echo "=== Test 0: home-directory git-repo boundary (regression for the real bug this machine has) ==="
 # Give the FAKE home its own .git, matching this machine's real ~/.git shape,
 # and put a cwd inside it (not at its root). walkForGitRoot must stop at the
@@ -223,7 +240,7 @@ echo -e "# Session checkpoint\nscope: project\nrepo: trim_project\nsession_id: s
 for i in 1 2 3; do echo "recent $i" > "$TRIM_ARCHIVE/2026-recent-$i.md"; done
 for i in 1 2; do
   echo "old $i" > "$TRIM_ARCHIVE/2020-old-$i.md"
-  touch -d "10 days ago" "$TRIM_ARCHIVE/2020-old-$i.md" 2>/dev/null || touch -d "@$(( $(date +%s) - 864000 ))" "$TRIM_ARCHIVE/2020-old-$i.md"
+  touch_seconds_ago 864000 "$TRIM_ARCHIVE/2020-old-$i.md"
 done
 run_hook memory-compact.js "$TRIM_PROJECT" '{"cwd":"'"$TRIM_PROJECT"'"}' > /dev/null
 REMAINING=$(find "$TRIM_ARCHIVE" -name '*.md' | wc -l)
@@ -269,7 +286,7 @@ STALE_CWD_POSIX="$WORK/stale_cwd"
 mkdir -p "$STALE_CWD_POSIX"
 STALE_CWD=$(win_path "$STALE_CWD_POSIX")
 echo "held by a dead process" > "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock"
-touch -d "20 seconds ago" "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock" 2>/dev/null || touch -d "@$(( $(date +%s) - 20 ))" "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock"
+touch_seconds_ago 20 "$STALE_HOME_POSIX/.claude/session/.checkpoint.lock"
 CLAUDE_HARNESS_HOME_OVERRIDE="$STALE_HOME" run_hook memory-checkpoint.js "$STALE_CWD" '{"cwd":"'"$STALE_CWD"'","session_id":"sS","tool_input":{"file_path":"/stale-test.js"}}'
 [ -f "$STALE_HOME_POSIX/.claude/session/checkpoint.md" ] || fail "write did not happen -- stale lock (>10s) was not reclaimed"
 grep -q "stale-test.js" "$STALE_HOME_POSIX/.claude/session/checkpoint.md" || fail "checkpoint written but missing expected content after stale-lock reclaim"
