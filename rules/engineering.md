@@ -37,7 +37,7 @@ Also from `superpowers`: `requesting-code-review` / `receiving-code-review` skil
 
 ## Static analysis — beyond raw CI Semgrep
 
-This repo's CI already runs Semgrep end-of-pipeline. `trailofbits/skills` (CodeQL + Semgrep + a triage subagent classifying true/false positives, from an independent security research firm) is the recommended agent-facing layer on top.
+This repo's CI already runs Semgrep end-of-pipeline. `trailofbits/skills` — install both the `static-analysis` plugin (CodeQL + Semgrep scanning) and the `fp-check` plugin (true/false-positive triage — this moved out of `static-analysis` into its own plugin; installing only `static-analysis` gets scanning with no triage) from Trail of Bits, an independent security research firm — is the recommended agent-facing layer on top. Re-audited 2026-08-10 for supply-chain drift since original vetting — none found (verified commit signing, protected branch, CODEOWNERS requiring TOB core review via `gh api`). Caveat: `fp-check` ships a Stop hook that can block session end (`{"ok": false}`) — install the plugin for its triage agents, do not wire that hook into `settings.json`; same blocking-primitive class this file already rejects `semgrep-guardian` for below.
 
 **`semgrep-guardian` — do not install, corrected 2026-08-02.** It was the original pick here; adversarial review found it's confirmed broken on Windows (silently returns no findings ever — `semgrep/guardian#59`; crashes on a cross-drive project — `#60`, both open), and its `hooks.json` registers a `PreToolUse` hook on `Write|Edit|Bash` — the same blocking primitive as the demolished `phase-gate.js`, contradicting this pack's "no mechanical gates" premise. It also ships a skill literally named `semgrep`, identical to trailofbits' — installing both risks silent skill-shadowing (Trail of Bits found and tried to fix this exact collision in their own plugin; the fix wasn't merged). Use `trailofbits/skills` alone.
 
@@ -53,9 +53,7 @@ This repo's CI already runs Semgrep end-of-pipeline. `trailofbits/skills` (CodeQ
 
 `compound-engineering-plugin` (Every.to) — commit → push → PR (auto-documents new concepts) → babysit CI/review comments until merge → draft release notes. Whole loop, not just message formatting.
 
-## What this replaces
-
-Claude Harness v4 enforced a subset of the Ponytail baseline mechanically: `pass-ceiling.js` (5-edit block), `phase-gate.js` (red/green TDD blocking), surgical-changes as "Tier C advisory." v5 keeps the substance and drops the enforcement machinery. Everything beyond the baseline (debugging, review, static analysis, dependency hygiene, perf, commit lifecycle) is **net-new breadth v4 never had at all** — it wasn't demolished, it didn't exist.
+**What this replaces:** see `WORKFLOW.md`'s "What this replaces" section — not repeated here.
 
 ## TDD — advisory, not gated
 

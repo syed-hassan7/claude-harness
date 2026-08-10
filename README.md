@@ -5,7 +5,7 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.0-3b82f6.svg)](skills/manifest.yaml)
+[![Version](https://img.shields.io/badge/version-3.0.0-3b82f6.svg)](skills/manifest.yaml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#quick-start)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
@@ -126,7 +126,7 @@ memory/
                              run after touching anything under memory/hooks/
 
 skills/
-├── manifest.yaml           44+ skills, 12 categories, portable contract
+├── manifest.yaml           48+ skills, 12 categories, portable contract
 └── RESEARCH.md             The sourced, spot-checked research trail — read this
                             when you don't want to take the manifest on faith
 

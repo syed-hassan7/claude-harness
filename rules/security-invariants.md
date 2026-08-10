@@ -41,4 +41,4 @@ Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) bl
 1. **Rules** (this file) — loaded into every agent's always-applied context, every session, regardless of task type.
 2. **Hooks** — `secret-guard.js` mechanically blocks writes matching secret file patterns as a backstop; rules cover everything a static pattern match can't catch (reading, echoing, scope-widening, auth logic).
 
-This file supersedes the Tier A/B/C mechanical-enforcement taxonomy from Claude Harness v4 (`harness.md` §0b). There is no tier system in v5 — there is one always-on invariant set, full stop. Substance carries forward unchanged; the phase-gate and rigor-mode conditionality does not.
+"Tier 0" in the headings above is a naming holdover, not an active hierarchy — no tier system in v5, one always-on invariant set, full stop.

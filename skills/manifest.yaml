@@ -365,6 +365,29 @@ skills:
     source: "bundled"
     notes: "Already available as a Claude Code skill in this environment."
 
+  - name: design-md
+    role: "Brand-specific design tokens (color/typography/spacing) for 74 named real products — reference for matching a specific product's look"
+    required: false
+    trigger: "ui + task explicitly names a real product to mimic (e.g. 'build this like Stripe')"
+    source: "https://github.com/VoltAgent/awesome-design-md (design-md/ subdirectory)"
+    install: "Copy the single matching company's design-md/<company>/DESIGN.md into the project on demand — never bulk-vendor the repo. Keep the repo's MIT license notice with it (e.g. a short attribution comment or pointer to the source repo) since a lone copied file loses the root LICENSE context it shipped with."
+    pin: "8147538"
+    license: "MIT"
+    vet_date: "2026-08-10"
+    notes: >
+      Security audit clean (2026-08-10) — full sweep for hidden/injected
+      instructions, unicode tricks, CSS-hiding, suspicious URLs across all
+      74 DESIGN.md files: zero hits. Real org (VoltAgent, 10k+-star flagship
+      product elsewhere, not a throwaway). Caveat: 107k stars off 4
+      contributors in ~4 months is that org's recognizable growth-marketing
+      pattern across their whole "awesome-*" portfolio (same shape repeats
+      across 4+ of their repos) — don't cite the star count as a quality
+      signal on its own. Content itself is substantive: 487-821 lines per
+      company, concrete design tokens, not thin. Complements ui-ux-pro-max
+      (generic styles) rather than duplicating it (brand-specific fidelity).
+      Pinned to the commit audited above — re-run the security sweep before
+      bumping the pin, this repo has no releases/tags to anchor to instead.
+
   - name: impeccable
     role: "Anti-slop design skill — polish/audit/critique/distill/animate + CI-hookable detect rules"
     required: false
