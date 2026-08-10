@@ -139,7 +139,9 @@ install.sh                  Idempotent installer — pack files -> ~/.claude/cla
                              statusline -> ~/.claude/statusline.sh, marked pointer
                              block -> ~/.claude/CLAUDE.md. See "Using it today" below.
 WORKFLOW.md                 The loop above, in full
-CLAUDE_HARNESS_ANALYSIS.md  How this pack replaced its own gated predecessor
+CLAUDE_HARNESS_ANALYSIS.md  Historical planning doc — analyzes the separate
+                             machina v4 repo's demolition (never executed);
+                             not this repo's own file history
 ```
 
 </details>

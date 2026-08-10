@@ -33,7 +33,7 @@ echo "=== Test: jq truly absent (PATH scrubbed, no WinGet fallback dir) -> hones
 FAKE_HOME="$SCRIPT_DIR/.test-fake-home"
 mkdir -p "$FAKE_HOME"
 set +e
-OUT=$(echo "$PAYLOAD" | PATH="/usr/bin:/bin" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local")" bash "$STATUSLINE" 2>"$SCRIPT_DIR/.test-stderr")
+OUT=$(echo "$PAYLOAD" | PATH="/usr/bin:/bin" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local" 2>/dev/null)" bash "$STATUSLINE" 2>"$SCRIPT_DIR/.test-stderr")
 CODE=$?
 set -e
 ERR=$(cat "$SCRIPT_DIR/.test-stderr")
@@ -66,7 +66,7 @@ else
     cp "$REAL_JQ" "$PKG_DIR/jq.exe"
     chmod +x "$PKG_DIR/jq.exe"
 
-    OUT3=$(echo "$PAYLOAD" | PATH="/usr/bin:/bin" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local")" bash "$STATUSLINE")
+    OUT3=$(echo "$PAYLOAD" | PATH="/usr/bin:/bin" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local" 2>/dev/null)" bash "$STATUSLINE")
     rm -rf "$FAKE_HOME"
 
     echo "$OUT3" | grep -q "Context Window" || fail "expected a real statusline via WinGet-dir fallback, got: $OUT3"

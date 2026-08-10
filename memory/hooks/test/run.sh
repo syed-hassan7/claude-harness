@@ -53,6 +53,15 @@ PROJECT=$(win_path "$PROJECT_POSIX")
 
 export CLAUDE_HARNESS_HOME_OVERRIDE="$FAKE_HOME"
 
+# Baseline for Test 13 below. All hook invocations in this suite are sandboxed
+# via CLAUDE_HARNESS_HOME_OVERRIDE, so nothing here should ever touch the real
+# path -- but on a machine that's actually dogfooding these hooks (memory
+# hooks wired into real settings.json), the real ~/.claude/session legitimately
+# already has content from genuine usage before this suite even starts. An
+# existence check can't tell "this run polluted it" from "was already there";
+# a before/after diff can.
+PRE_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)"
+
 PASS_COUNT=0
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); echo "PASS: $1"; }
 fail() { echo "FAIL: $1"; exit 1; }
@@ -300,11 +309,15 @@ grep -q "/f11\.js" "$MAXF_CP" || fail "expected /f11.js (the 50th-newest, i.e. o
 pass "MAX_FILES=50 correctly trims to the newest 50 entries"
 
 echo ""
-echo "=== Test 13: real ~/.claude/session left untouched by this entire run ==="
-if [ -e ~/.claude/session ]; then
-  fail "real ~/.claude/session exists after a fully-scoped test run -- pollution regression"
+echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
+POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)"
+if ! NEW_PATHS="$(comm -13 <(printf '%s\n' "$PRE_SESSION_SNAPSHOT") <(printf '%s\n' "$POST_SESSION_SNAPSHOT"))"; then
+  fail "could not compare real ~/.claude/session snapshots -- comm itself failed, this check did not run"
 fi
-pass "real ~/.claude untouched"
+if [ -n "$NEW_PATHS" ]; then
+  fail "pollution regression -- this run created real files outside the sandbox: $NEW_PATHS"
+fi
+pass "real ~/.claude/session gained no new file paths this run (path comparison only -- does not diff pre-existing files' contents)"
 
 echo ""
 echo "ALL $PASS_COUNT CHECKS PASSED"

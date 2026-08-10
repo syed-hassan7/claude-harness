@@ -2,7 +2,7 @@
 # Installs the Claude Harness rules/skills/memory pack + statusline into
 # ~/.claude. Idempotent — safe to re-run after `git pull`.
 #
-# Usage: ./install.sh [--with-memory-hooks]
+# Usage: ./install.sh [--with-memory-hooks] [--check]
 #   --with-memory-hooks   Also install the session-checkpoint hooks (see
 #                          memory/SPEC.md). Opt-in, default off: these fire on
 #                          every single Edit/Write once wired, and this
@@ -11,12 +11,24 @@
 #                          installed with this flag, a later plain `./install.sh`
 #                          (no flag) does NOT remove them — there is no
 #                          implicit uninstall.
+#   --check                Report-only drift check: diffs the installed pack
+#                          (~/.claude/claude-harness/) against this repo's
+#                          current source, one file/dir at a time. Prints any
+#                          mismatches and exits 1 if drift is found, exits 0 if
+#                          the pack matches exactly. Never writes anything —
+#                          catches the case where the pack fell out of sync
+#                          with the repo (e.g. install.sh ran against a dirty
+#                          worktree, or the pack was edited directly) without
+#                          mutating ~/.claude/CLAUDE.md the way a real install
+#                          run would. Exits before any install step runs.
 set -euo pipefail
 
 WITH_MEMORY_HOOKS=0
+CHECK_MODE=0
 for arg in "$@"; do
   case "$arg" in
     --with-memory-hooks) WITH_MEMORY_HOOKS=1 ;;
+    --check) CHECK_MODE=1 ;;
   esac
 done
 
@@ -24,6 +36,42 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${CLAUDE_HARNESS_TARGET:-$HOME/.claude}"
 PACK_DIR="$CLAUDE_DIR/claude-harness"
 CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
+
+# --- --check: report-only drift check, exits before any install step runs ---
+if [ "$CHECK_MODE" -eq 1 ]; then
+  echo "[claude-harness] --check: diffing installed pack ($PACK_DIR) against source ($REPO_DIR)"
+  DRIFT=0
+  check_path() {
+    local rel="$1"
+    if [ ! -e "$PACK_DIR/$rel" ]; then
+      echo "[claude-harness] MISSING: $rel not installed"
+      DRIFT=1
+      return
+    fi
+    local tmp
+    tmp="$(mktemp)"
+    if ! diff -rq "$REPO_DIR/$rel" "$PACK_DIR/$rel" >"$tmp" 2>&1; then
+      cat "$tmp"
+      DRIFT=1
+    fi
+    rm -f "$tmp"
+  }
+  for rel in rules skills memory/SPEC.md memory/templates caveman WORKFLOW.md; do
+    check_path "$rel"
+  done
+  # memory/hooks is opt-in (--with-memory-hooks) — only check it if it was
+  # actually installed; its absence is expected default state, not drift.
+  if [ -d "$PACK_DIR/memory/hooks" ]; then
+    check_path "memory/hooks"
+  fi
+  if [ "$DRIFT" -eq 0 ]; then
+    echo "[claude-harness] pack matches source exactly — no drift"
+    exit 0
+  else
+    echo "[claude-harness] drift found — re-run ./install.sh (without --check) to sync"
+    exit 1
+  fi
+fi
 
 # On Git Bash, $HOME/PACK_DIR/etc. are POSIX-style (/c/Users/...). That's fine
 # for this script's own file operations, but any path we WRITE into CLAUDE.md
@@ -147,7 +195,19 @@ fi
 # hand-written security rules, dedupe them against rules/security-invariants.md
 # yourself first — this installer never overwrites your prose, only its own
 # marked block.
+# A run against a dirty tree stamps CLAUDE.md with a hash that predates
+# whatever cp -r just copied a few lines below -- silently wrong provenance,
+# not just imprecise (found on this exact repo: caveman/ and
+# skills/manifest.yaml were both installed from an uncommitted worktree, then
+# committed minutes later, leaving the stamped hash pointing at the prior
+# commit). `git describe --dirty` alone isn't enough here -- it only inspects
+# tracked-file diffs against the index, so a brand-new UNTRACKED file (e.g. a
+# not-yet-`git add`ed skill under rules/ or skills/) would still get copied by
+# cp -r while the stamp claims clean. --untracked-files=all catches both.
 COMMIT="$(cd "$REPO_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(cd "$REPO_DIR" && git status --porcelain --untracked-files=all 2>/dev/null)" ]; then
+  COMMIT="${COMMIT}-dirty"
+fi
 BLOCK_FILE="$(mktemp)"
 {
   echo "$MARKER_START"

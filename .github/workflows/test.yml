@@ -1,0 +1,26 @@
+name: test
+
+# Validates hook LOGIC across the 3 platforms this pack's README claims to
+# support. It cannot and does not validate the class of bug that motivated
+# this workflow's own Test 13 fix in memory/hooks/test/run.sh: drift between
+# a live-deployed machine's real state and a test's environmental
+# assumptions. A GitHub-hosted runner is always a clean, ephemeral sandbox
+# with no pre-existing ~/.claude/session and no dirty dev-machine history —
+# green CI here is not a substitute for occasionally running the suite on a
+# machine that actually dogfoods these hooks.
+on: [push, pull_request]
+
+jobs:
+  memory-and-statusline-tests:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: memory hooks test suite
+        shell: bash
+        run: bash memory/hooks/test/run.sh
+      - name: statusline test suite
+        shell: bash
+        run: bash statusline/test.sh

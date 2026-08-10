@@ -2,6 +2,8 @@
 
 **Status:** Analysis only. No file in this repo has been deleted, moved, or edited to produce this document — everything below is new. Demolition/archival is a **separate, future implementation PR** requiring its own approval.
 
+**Scope note (added 2026-08-10):** every path in §0's classification tables (`.claude/hooks/harness-lib.js`, `scripts/`, `Makefile`, `.github/workflows/ci.yml`, etc.) belongs to the separate `machina` repo — the v4 harness codebase — not to `claude-harness`. None of those files exist here; `claude-harness` shipped as a fresh v5-only repo instead of a migration of `machina` in place. The demolition/migration plan below (§5–§6) was never executed against `machina` — as of this note, `machina` remains on v4, untouched. This document is historical planning context only, kept for provenance, not a description of this repo's own file history.
+
 **Source directive:** `~/.cursor/plans/machina_god-prompt_2ec20c3e.plan.md` ("Claude Harness v5 — Strip the Harness, Ship the Stack").
 
 ---
