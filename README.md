@@ -5,13 +5,15 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-3.0.0-3b82f6.svg)](skills/manifest.yaml)
+[![Version](https://img.shields.io/badge/version-5.0.0-3b82f6.svg)](skills/manifest.yaml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#quick-start)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
 </div>
 
 Most agent harnesses try to control the agent: phase gates, edit ceilings, verifier artifacts you have to produce to prove you didn't skip a step. Claude Harness assumes the opposite — a well-briefed agent doesn't need a cage, it needs good judgment, good defaults, and a memory that gets smarter instead of bigger. Nothing here is a plugin you install to get "control back," it's context you hand the agent.
+
+This wasn't the starting design — it's the correction. The predecessor (`machina`, still live as a separate repo) was exactly the cage described above: a 12-phase state machine with a rigor dial, a 5-edit pass ceiling, and mechanical Edit/Write blocking until you produced a verifier artifact proving you'd followed the phases in order. It worked, in the narrow sense that it enforced sequence. It didn't make the agent better at the task — it made the agent better at satisfying the harness, which is a different and less useful thing. v5 is what's left after asking, file by file, "does removing this make the agent worse at the actual work, or just less supervised?" (the full file-by-file answer is `CLAUDE_HARNESS_ANALYSIS.md`, kept here as the historical record of that demolition). What survived the cut: `secret-guard.js` (the one hook that blocks something, because "never write a live credential to disk" isn't a judgment call worth leaving to judgment) and everything below, restructured as things an agent reads and reasons about instead of things a state machine enforces.
 
 > [!NOTE]
 > **Claude Code is the fully-installed target** — `install.sh` wires rules, skills, memory, and the statusline into `~/.claude`. Cursor and Codex aren't wired up yet: no `adapters/cursor/`, no root `AGENTS.md` ship in this repo today. Everything under `rules/` is plain markdown, though — paste `rules/security-invariants.md` into `.cursor/rules/` or an `AGENTS.md` yourself if you're on one of those.
@@ -30,7 +32,7 @@ Idempotent — safe to re-run after `git pull`. That's rules, skills catalog, me
 
 <div align="center">
 
-**[The loop](#the-loop) · [What makes this different](#four-things-that-make-this-different) · [Statusline](#statusline--the-one-piece-thats-not-just-a-spec) · [What's inside](#whats-inside) · [Why not X?](#why-not-just-use-gated-harness--claude-mem--claude-reflect) · [Full install guide](#using-it-today) · [Provenance](#provenance)**
+**[The loop](#the-loop) · [What makes this different](#four-things-that-make-this-different) · [In practice](#in-practice--receipts-not-claims) · [Statusline](#statusline--the-one-piece-thats-not-just-a-spec) · [What's inside](#whats-inside) · [Why not X?](#why-not-just-use-gated-harness--claude-mem--claude-reflect) · [Full install guide](#using-it-today) · [Provenance](#provenance)**
 
 </div>
 
@@ -88,6 +90,18 @@ Rules are plain markdown, skills are a YAML contract, memory is files-on-disk. N
 </td>
 </tr>
 </table>
+
+## In practice — receipts, not claims
+
+The four boxes above are easy to assert and hard to verify from the outside. There's no formal before/after benchmark yet — an earlier attempt at one (for the old `machina` v4 harness) turned out to be measuring the wrong thing entirely: single-shot stateless subagents with no tool calls and no hooks firing, so it only tested whether injected prose changed output, never whether the actual mechanical layer did anything. That attempt is documented, not repeated, and a real one needs a clean machine, N≥5 runs per task, and genuine multi-turn sessions where hooks actually fire — noted here as an open item, not swept under the rug.
+
+What exists instead is real incidents from actual sessions, the kind a benchmark would be trying to approximate anyway:
+
+- **A fabricated citation, caught before it shipped.** During the 2026-08-02 adversarial research pass, a subagent attributed content to a GitHub issue number that the issue didn't actually contain. Caught because every load-bearing claim in that pass got spot-checked directly (`gh api`, raw source fetches) instead of trusted on the subagent's word — see `skills/RESEARCH.md` §8. The manifest's "vetted, not vibed" claim isn't abstract; this is what it looks like when it catches something.
+- **Five commits to make CI tell the truth.** `.github/workflows/test.yml` shipped once, then broke four more times on real OS differences before it actually passed clean on Windows, macOS, and Ubuntu: `set -e` aborting the whole suite on a clean runner, `touch -d` being GNU-only, a hardcoded `PATH` dropping `jq` on `ubuntu-latest`, and that runner's `jq` turning out to be a Chocolatey shim, not a copyable binary. Each fix is its own commit, titled honestly ("Fix CI failure #4," not "improve CI") — the git log for `.github/workflows/test.yml` is the actual record.
+- **The mistake-memory system's first real lesson, written the hard way.** The self-learning design in `memory/SPEC.md` shipped with a schema and a criticality gate but zero lessons ever actually written — until a session where a confident advisor recommendation got chained straight into an unauthorized edit of `skills/manifest.yaml`, the user caught it immediately, and the resulting lesson (full incident, full criticality-gate trail, generalizable rule extracted, not just the incident logged) became the mechanism's first real write. The point isn't that the mistake happened — it's that the pack has a place for it to go that isn't "forgotten by next session."
+
+None of this is a substitute for the benchmark that doesn't exist yet. It's what "learns from being wrong" and "vetted, not vibed" cash out to when something actually goes sideways.
 
 ## Statusline — the one piece that's not just a spec
 
