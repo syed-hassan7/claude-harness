@@ -116,7 +116,17 @@ else
     FAKE_HOME="$SCRIPT_DIR/.test-fake-home-winget"
     PKG_DIR="$FAKE_HOME/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe"
     mkdir -p "$PKG_DIR"
-    cp "$REAL_JQ" "$PKG_DIR/jq.exe"
+    # NOT `cp` -- confirmed on GitHub's windows-latest runner: its pre-installed
+    # jq is a Chocolatey shim, a tiny launcher that finds the real jq.exe via a
+    # relative path back to its own install dir ("..\lib\jq\tools\jq.exe").
+    # Copying that shim's bytes elsewhere breaks the relative lookup outright
+    # ("Cannot find file at ..."). A wrapper script pointed at jq's real,
+    # unmoved path sidesteps the question of whether the resolved binary is
+    # even copyable -- same technique already proven for SCRUBBED_PATH above,
+    # and bash (which is what actually invokes this file, via statusline.sh's
+    # own `"$jq_fallback" "$@"`) reads shebang scripts by content, not by the
+    # .exe extension on the filename.
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "$REAL_JQ" > "$PKG_DIR/jq.exe"
     chmod +x "$PKG_DIR/jq.exe"
 
     OUT3=$(echo "$PAYLOAD" | PATH="$SCRUBBED_PATH" HOME="$FAKE_HOME" LOCALAPPDATA="$(cygpath -w "$FAKE_HOME/AppData/Local" 2>/dev/null)" "$BASH_BIN" "$STATUSLINE")
