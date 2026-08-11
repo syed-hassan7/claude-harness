@@ -325,6 +325,22 @@ grep -q "/f60\.js" "$MAXF_CP" || fail "newest file (/f60.js) missing -- should a
 grep -q "/f11\.js" "$MAXF_CP" || fail "expected /f11.js (the 50th-newest, i.e. oldest survivor) to be present"
 pass "MAX_FILES=50 correctly trims to the newest 50 entries"
 
+echo "=== Test 20: lessons index over cap -- truncation note reports how many entries were cut ==="
+TRUNC_HOME_POSIX="$WORK/trunc_home"
+mkdir -p "$TRUNC_HOME_POSIX/.claude/lessons"
+TRUNC_HOME=$(win_path "$TRUNC_HOME_POSIX")
+TRUNC_CWD_POSIX="$WORK/trunc_cwd"
+mkdir -p "$TRUNC_CWD_POSIX"
+TRUNC_CWD=$(win_path "$TRUNC_CWD_POSIX")
+# 35 lines of ~260 bytes each (~9240 bytes total, verified) -- comfortably
+# over the 8000-byte cap by a known, countable margin.
+for i in $(seq 1 35); do
+  printf -- '- lesson-%02d: %s\n' "$i" "$(printf 'x%.0s' $(seq 1 250))" >>"$TRUNC_HOME_POSIX/.claude/lessons/index.md"
+done
+TRUNC_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$TRUNC_HOME" run_hook memory-init.js "$TRUNC_CWD" "{\"cwd\":\"$TRUNC_CWD\",\"session_id\":\"sT\"}")
+echo "$TRUNC_OUT" | grep -qE "truncated: [0-9]+ older entr(y|ies) cut" || fail "truncation note missing or not in the new loud format -- expected 'truncated: N older entries cut'"
+pass "lessons index truncation note reports a concrete dropped-entry count, not a silent pointer"
+
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true

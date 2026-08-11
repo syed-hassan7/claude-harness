@@ -68,7 +68,15 @@ function main() {
   if (fs.existsSync(lessonsIndexPath)) {
     let idx = fs.readFileSync(lessonsIndexPath, 'utf8');
     if (Buffer.byteLength(idx, 'utf8') > LESSONS_INDEX_CAP_BYTES) {
-      idx = idx.slice(0, LESSONS_INDEX_CAP_BYTES) + `\n... truncated, see ${lessonsIndexPath}`;
+      const kept = idx.slice(0, LESSONS_INDEX_CAP_BYTES);
+      const droppedLines = idx
+        .slice(LESSONS_INDEX_CAP_BYTES)
+        .split('\n')
+        .filter((l) => l.trim().length).length;
+      // Loud, not silent (mined from NousResearch/hermes-agent's fail-on-
+      // overflow memory tool, 2026-08-11) — say what got cut and how much,
+      // don't just point at the file and let the agent discover the gap.
+      idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${lessonsIndexPath}`;
     }
     parts.push('## Claude Harness — lessons index\n\n' + idx.trim());
   }

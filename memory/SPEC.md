@@ -106,8 +106,9 @@ See `memory/templates/checkpoint.md` for the literal template. Fields: `scope`, 
 | **B. claude-mem MCP** | Semantic recall, timeline queries | Background worker, install friction, per `harness.md` §7 was optional/full-profile-only in v4 and not installed by default — maturity unverified pending `skills/RESEARCH.md` | Document as optional power-user adapter only, not default |
 | **C. Hybrid (A + claude-mem)** | Files for continuity + semantic query for "what did we decide about X" | Two systems to maintain; only worth it once A's forensic-lookup glob proves insufficient in practice | Document as `memory/claude-mem.md` optional adapter, not built by default |
 | **D. Ponytail-style AGENTS.md only** | Zero infra | No real session memory — the exact gap this whole layer exists to close | Rejected |
+| **E. SQLite FTS5 for forensic lookup** (mined from `NousResearch/hermes-agent`'s session-search design, 2026-08-11) | Real full-text search (~20ms), no daemon — a library + file, not a running server, so it doesn't reintroduce the background-worker friction that sank **B** or `moi.computer` | New dependency against `_lib.js`'s current zero-dependency stance; Node's built-in `node:sqlite` was Stability 1.2 (release candidate, not fully stable) as of Node 25.7 per Node's own docs checked this date — verify current status before adopting, don't assume; `better-sqlite3` avoids that but needs a native build toolchain, the exact friction `pdf-inspect`'s entry in `skills/manifest.yaml` is praised for avoiding. Also unclear this is a real problem yet at current archive scale (10 checkpoints/7-day trim, single lessons index) — YAGNI rung 1 | **WATCH, not adopted.** Revisit only if/when glob-and-read-one-file-at-a-time forensic lookup actually becomes slow or unwieldy in practice — a real bottleneck, not a hypothetical one. If that day comes, prefer `node:sqlite` over `better-sqlite3` once it's fully stable, specifically to avoid the build-toolchain requirement. |
 
-**Recommendation:** ship **A** (this spec) as the v5 default. Document **C** as an optional adapter note for power users once claude-mem's current maintenance status is confirmed in `skills/RESEARCH.md`.
+**Recommendation:** ship **A** (this spec) as the v5 default. Document **C** as an optional adapter note for power users once claude-mem's current maintenance status is confirmed in `skills/RESEARCH.md`. **E** is documented for the same reason as **C** — a real, named upgrade path, not built until its trigger condition is actually met.
 
 ## Mistake-memory (self-learning from corrections and wasted effort)
 
@@ -132,8 +133,9 @@ No Claude Code hook exposes a semantic "the user just corrected me" signal, or t
 2. **Veto on non-correction phrases** — "no problem," "never mind," "don't worry," "no worries," a message ending in `?` — these read like correction openers but aren't (borrowed list, `claude-reflect`'s `NON_CORRECTION_PHRASES`).
 3. **Require co-occurrence in the same sentence**, not just anywhere in the message: a weak cue ("actually," "instead") only counts if it sits next to a directive verb in the same sentence (`claude-memory-loops`).
 4. **Generalizability test** — would this same approach actually be wrong in a *different* context, or was this situation-specific? The founder named the failure mode this guards against explicitly: "I could wrongfully correct you while your approach was right." If genuinely uncertain and it matters, say so in the moment instead of silently encoding a lesson that might be wrong.
+5. **Duplicate check** (added 2026-08-11, mined from `NousResearch/hermes-agent`'s memory tool — it rejects exact-duplicate entries at write time). Before writing, read the current scope's `lessons/index.md`; if a line with substantially identical content (same `id`, or the same generalizable rule already stated) already exists, do not write a new entry. This is not a fifth veto on whether a correction is genuine — items 1–4 already settled that — it's a final backstop specifically against the failure mode `retro-skill`'s own predecessor hit (~35x duplicate fingerprints accumulating because nothing checked before writing, not because detection was too loose).
 
-Only a correction that survives all four gets written down. This is agent-judgment applied through explicit tests, not a vibe — the tests exist specifically because nothing else does this and false positives silently poison the lesson store.
+Only a correction that survives all five gets written down. This is agent-judgment applied through explicit tests, not a vibe — the tests exist specifically because nothing else does this and false positives silently poison the lesson store.
 
 ### Storage — schema, injection, and what happens past ~50 lessons
 
@@ -143,6 +145,10 @@ Only a correction that survives all four gets written down. This is agent-judgme
 - **Supersession, not deletion:** when a later session invalidates an old lesson, strike it through inline in the same file (`~~old lesson text~~` + an HTML-comment timestamp/reason) rather than deleting it — verified pattern, `JustVugg/mnem`. Keeps history git-diffable, no second file to reconcile.
 - Same scope split as the checkpoint system: project-specific lessons live in the repo, general/cross-project ones live globally.
 - **Explicit non-goal:** no continuous background hook accumulates candidates. Detection and the criticality gate both happen inline, in the agent's own turn, at the moment a correction or effort-mismatch is recognized — never as a batch pass over a transcript log.
+
+### Considered and deferred: a durable user-profile file
+
+`NousResearch/hermes-agent` splits its memory into `MEMORY.md` (agent notes) and `USER.md` (durable user profile — preferences, communication style — distinct from both session-scoped checkpoints and correction-scoped lessons). Considered adding an equivalent global-only sibling file here, 2026-08-11, and deferred: for a Claude-Code-only user, this would be a third store for content already covered by Claude Code's own native per-user memory and by `~/.claude/CLAUDE.md`'s standing preferences section, with no write trigger distinguishing it from either. The portability case (Cursor/Codex don't get Claude Code's native memory) doesn't hold today — those adapters are named as a future ambition in this repo's own README, not shipped. Revisit if/when a non-Claude-Code adapter actually ships; don't build the file or its `memory-init.js` injection block before then.
 
 ## Concurrency
 
