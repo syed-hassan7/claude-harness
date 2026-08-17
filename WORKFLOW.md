@@ -32,7 +32,7 @@ Caveman ultra is the default communication style across this whole loop — not 
 ## Verify
 
 - **External verification only** — run the tests, linter, build, and read their actual output. Never self-grade "done" from having written plausible code (`rules/security-invariants.md`, Tier 0 — Agent behavior).
-- UI changes: actually exercise the feature (browser, Playwright) before calling it done. If you can't verify visually in a given environment, say so explicitly rather than claiming success.
+- UI changes: `rules/design-lane.md`'s render-before-judging gate is hard, not optional — an actual screenshot compared against a "before," never a source/DOM/jsdom check standing in for one. If you can't verify visually in a given environment, say so explicitly rather than claiming success.
 - Memory checkpoint updates as you go — see `memory/SPEC.md` for the automatic hook-driven mechanism (no manual `/compact`).
 
 ## Security-if-needed

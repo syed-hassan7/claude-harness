@@ -77,6 +77,16 @@ Test-first is valuable when the user wants it. Use `superpowers`' `test-driven-d
 
 Cherry-pick spec-kit's spec/plan templates if useful; don't wire its full gate-driven workflow (same guidance as before, now with a lighter default to reach for first).
 
+## Authoring this pack itself — context economy
+
+Applies when editing `rules/*.md`, `skills/manifest.yaml`, `CLAUDE.md`, or any skill definition — not app code. Source: [danhopwood.com/posts/the-context-engineering-skill](https://danhopwood.com/posts/the-context-engineering-skill), vetted 2026-08-17.
+
+- **Audit rule:** if deleting a line wouldn't change what the agent does, delete it. A leanness pass doubles as a correctness pass — it also surfaces stale claims and dead paths.
+- **State actions, not reasoning.** Justify a rule only where the justification prevents misapplication (an edge case the rule alone wouldn't cover) — not by default.
+- **Push vs. pull, by frequency of need:** always-needed facts → `CLAUDE.md`; area-specific guidance → path-scoped rules (this repo's `rules/*.md`); multi-step procedures → skills; deep domain knowledge → on-demand docs; anything derivable (syntax, layout) → don't write it down at all.
+- **Structure over examples** for open-ended tasks — templates/named-arguments/option-lists leave room to adapt; worked examples narrow exploration to "do what the example did."
+- **Hard rules only for irreversible mistakes**; leave judgment room everywhere else — matches this pack's existing "advisory, not a mechanical gate" stance (see `WORKFLOW.md`).
+
 ## Architecture review — beyond per-change simplicity
 
 Ponytail's ladder governs simplicity *per change*; it doesn't review structure across a codebase. Use `improve-codebase-architecture` when module boundaries are unclear or coupling is fighting the change you're trying to make — it looks for structural confusion and proposes module-deepening opportunities, not a per-diff style pass.
