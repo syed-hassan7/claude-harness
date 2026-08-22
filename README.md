@@ -5,7 +5,7 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-5.0.0-3b82f6.svg)](skills/manifest.yaml)
+[![Version](https://img.shields.io/badge/version-6.0.0-3b82f6.svg)](skills/manifest.yaml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#quick-start)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
@@ -37,6 +37,34 @@ Idempotent — safe to re-run after `git pull`. That's rules, skills catalog, me
 </div>
 
 ---
+
+## 🆕 What's new in 6.0.0
+
+Benchmarked the design lane against an external "How to Design With AI" methodology (component-library-first, moodboard-over-prose, many-variants-over-one). Result: the existing shadcn-first component search already matched it; three real gaps got closed.
+
+- **[React Bits](https://github.com/DavidHDev/react-bits)** — pre-built animated/personality components, checked before hand-assembling motion from raw primitives. `rules/design-lane.md` step 5.
+- **[Agentation](https://github.com/benjitaylor/agentation)** — click a rendered element, hand the agent its exact selector/position instead of prose-describing it. `rules/design-lane.md` step 7.
+- **Moodboard-first reference input** — real reference images now the primary input for the named-aesthetic commitment, not just a verbal style list. Steps 1–2.
+- **N-variant judge-panel for open-ended briefs** — generate several genuinely different directions in parallel and score them, instead of one build iterated on rejection. Step 9 — gated behind explicit user opt-in into multi-agent orchestration, never fired on its own.
+
+```mermaid
+flowchart LR
+    C1[Context + moodboard] --> C2[Named aesthetic]
+    C2 --> C3[ui-ux-pro-max review]
+    C3 --> C4[Brand tokens]
+    C4 --> C5[Component search]
+    C5 --> C6[Animation]
+    C6 --> C7[Render + anti-slop gate]
+    C7 --> C8[Concept vs execution]
+    C8 --> C9[Open direction]
+
+    style C1 fill:#1f3b1f,stroke:#16a34a,color:#fff
+    style C5 fill:#1f3b1f,stroke:#16a34a,color:#fff
+    style C7 fill:#1f3b1f,stroke:#16a34a,color:#fff
+    style C9 fill:#1f3b1f,stroke:#16a34a,color:#fff
+```
+
+Green = changed this pass. See `rules/design-lane.md`'s "Benchmarked against an external methodology" note for the full comparison.
 
 ## The loop
 
@@ -126,7 +154,7 @@ rules/
 ├── engineering.md          Ponytail YAGNI baseline + debugging, review, static
 │                           analysis, dependency hygiene, perf, planning,
 │                           architecture review, testability design
-├── design-lane.md          UI/UX sequence — triggered by task shape, not always-on
+├── design-lane.md          UI/UX sequence — triggered by task shape, not always-on 🆕
 └── security-invariants.md  One always-on invariant set, every session, every surface
 
 memory/
@@ -143,7 +171,7 @@ memory/
                              touching anything under memory/hooks/
 
 skills/
-├── manifest.yaml           48+ skills, 12 categories, portable contract
+├── manifest.yaml           52 skills, 12 categories, portable contract 🆕 (react-bits, agentation)
 └── RESEARCH.md             The sourced, spot-checked research trail — read this
                             when you don't want to take the manifest on faith
 
