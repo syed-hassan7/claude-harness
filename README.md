@@ -98,7 +98,7 @@ The four boxes above are easy to assert and hard to verify from the outside. The
 What exists instead is real incidents from actual sessions, the kind a benchmark would be trying to approximate anyway:
 
 - **A fabricated citation, caught before it shipped.** During the 2026-08-02 adversarial research pass, a subagent attributed content to a GitHub issue number that the issue didn't actually contain. Caught because every load-bearing claim in that pass got spot-checked directly (`gh api`, raw source fetches) instead of trusted on the subagent's word — see `skills/RESEARCH.md` §8. The manifest's "vetted, not vibed" claim isn't abstract; this is what it looks like when it catches something.
-- **Five commits to make CI tell the truth.** `.github/workflows/test.yml` shipped once, then broke four more times on real OS differences before it actually passed clean on Windows, macOS, and Ubuntu: `set -e` aborting the whole suite on a clean runner, `touch -d` being GNU-only, a hardcoded `PATH` dropping `jq` on `ubuntu-latest`, and that runner's `jq` turning out to be a Chocolatey shim, not a copyable binary. Each fix is its own commit, titled honestly ("Fix CI failure #4," not "improve CI") — the git log for `.github/workflows/test.yml` is the actual record.
+- **Five commits to make CI tell the truth.** `.github/workflows/test.yml` shipped once, then broke four more times on real OS differences before it actually passed clean on Windows, macOS, and Ubuntu: `set -e` aborting the whole suite on a clean runner, `touch -d` being GNU-only, a hardcoded `PATH` dropping `jq` on `ubuntu-latest`, and that runner's `jq` turning out to be a Chocolatey shim, not a copyable binary. Each fix is its own commit, titled honestly ("Fix CI failure #4," not "improve CI") — the git log for `statusline/test.sh` and `memory/hooks/test/run.sh` (the two suites where the Windows/macOS/Ubuntu differences actually surfaced, split across both) is the actual record.
 - **The mistake-memory system's first real lesson, written the hard way.** The self-learning design in `memory/SPEC.md` shipped with a schema and a criticality gate but zero lessons ever actually written — until a session where a confident advisor recommendation got chained straight into an unauthorized edit of `skills/manifest.yaml`, the user caught it immediately, and the resulting lesson (full incident, full criticality-gate trail, generalizable rule extracted, not just the incident logged) became the mechanism's first real write. The point isn't that the mistake happened — it's that the pack has a place for it to go that isn't "forgotten by next session."
 
 None of this is a substitute for the benchmark that doesn't exist yet. It's what "learns from being wrong" and "vetted, not vibed" cash out to when something actually goes sideways.
@@ -135,7 +135,7 @@ memory/
 ├── templates/              checkpoint.md, lesson.md schemas
 └── hooks/                  Working, opt-in hook implementation — see
                              "Using it today" below (install.sh --with-memory-hooks)
-    └── test/run.sh         22-case suite incl. Windows lockfile concurrency,
+    └── test/run.sh         23-case suite incl. Windows lockfile concurrency,
                              archive trim boundaries, stale-lock reclaim —
                              run after touching anything under memory/hooks/
 
@@ -143,6 +143,13 @@ skills/
 ├── manifest.yaml           48+ skills, 12 categories, portable contract
 └── RESEARCH.md             The sourced, spot-checked research trail — read this
                             when you don't want to take the manifest on faith
+
+caveman/                    Default-on terse communication mode — hooks + skill,
+                            see WORKFLOW.md's Communication baseline
+
+audit-log/
+└── SECURITY_SPEC.md         Spec only, not yet implemented — opt-in PostToolUse
+                             hook design for GRC/compliance data-access logging
 
 statusline/
 ├── statusline.sh            Drop-in ~/.claude/statusline.sh — see section above

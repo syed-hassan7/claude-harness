@@ -12,6 +12,17 @@ Any step can be revisited. There is no "phase" stored anywhere that prevents mov
 
 Caveman ultra is the default communication style across this whole loop — not a step, a standing default (see `skills/manifest.yaml`'s `caveman` entry, `caveman/skills/caveman/SKILL.md`). Terse, fragment-ok, no filler, arrows for causality. It stays on by default across sessions (`install.sh` seeds `defaultMode: ultra`), but two things override it: the Auto-Clarity carve-out (security warnings, irreversible-action confirmations render in plain language, then resume) and an explicit "stop caveman"/"normal mode" from the user. Code, commits, and PR text are always written in normal prose regardless of mode.
 
+### Deliverable format
+
+Markdown in, HTML out. Format follows the reader, not the mode above (prose terseness and deliverable format are separate axes):
+
+- **HTML** — default for anything a human will VIEW or SHARE rather than paste into another platform: reports, comparisons, dashboards, analysis write-ups. Self-contained (inline CSS/JS, no external requests). VIEW the rendered file before calling the task done — `Start-Process <path>` on this native-Windows setup, or the `Artifact` tool when the actual ask is a shareable link — and print its absolute path.
+- **Markdown** — stays for copy that gets pasted OUT to a platform (Slack, GitHub, Jira, chat prose) and for all core config/instruction/memory files (`CLAUDE.md`, `rules/*.md`, skill definitions, `memory/*.md`). Those are read by the model, not viewed by a human — Markdown's token efficiency is what matters there, per `rules/engineering.md`'s context-economy section.
+
+Source: charliehills.substack.com/p/html-md, vetted 2026-08-18. That post's `/show-me` plugin (`charlie947/show-me`) was evaluated, not adopted — direct README fetch confirmed a single-SKILL.md tool that auto-opens rendered HTML via `osascript`, macOS-only, wrong fit for this repo's native-Windows-PowerShell setup (see `skills/manifest.yaml`'s `reviewed_rejected`). `Start-Process`/`Artifact` already cover the "view it" step natively here.
+
+This rule targets one-off human-facing deliverables (reports, comparisons, analysis write-ups) — it doesn't relax `rules/design-lane.md`'s hard render-before-judging gate for actual UI/product code, which still requires a real browser/Playwright screenshot, not just an opened file.
+
 ## Understand
 
 - Read the relevant code before proposing a change. Reuse existing functions/utilities/patterns — see `rules/engineering.md`'s YAGNI ladder.

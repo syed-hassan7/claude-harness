@@ -1,6 +1,6 @@
 # Security invariants — always on
 
-These rules govern the agent on **every session, every surface** — terminal CLI, IDE agent chat, Claude Code, Cursor, Codex. They are **not** profile-gated, not rigor-gated, not optional, and do not depend on any phase or mode. This file is copied verbatim into every adapter's always-applied context (`AGENTS.md`, `.cursor/rules/security.mdc`, Claude Code always-on rules).
+These rules govern the agent on **every session, every surface** it actually runs on. They are **not** profile-gated, not rigor-gated, not optional, and do not depend on any phase or mode. Today that means Claude Code only — wired via the `CLAUDE.md` pointer block. The design intent is broader (this file written so it *can* be copied verbatim into another adapter's always-applied context — `AGENTS.md`, `.cursor/rules/security.mdc`, etc.), but no root `AGENTS.md` or `.cursor/` adapter actually ships in this repo yet (see README.md's intro) — don't assume Cursor/Codex enforcement exists until one does.
 
 Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) blocks writes matching secret patterns. Rules below are the full contract; the hook enforces the subset it can check mechanically.
 

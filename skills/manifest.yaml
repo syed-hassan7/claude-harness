@@ -2,9 +2,12 @@
 #
 # No profile gates. `required: true` = always on for every session.
 # `required: false` + `trigger:` = activates on task shape, not a rigor dial.
-# Every non-bundled entry traces to a source verified in skills/RESEARCH.md
-# (fetched 2026-08-02, cross-checked twice) — no entry here should carry a
-# claim RESEARCH.md doesn't back up.
+# Entries from the original 2026-08-02 research pass trace to a source
+# verified in skills/RESEARCH.md (cross-checked twice) — no claim there
+# should outrun what RESEARCH.md backs up. Entries added afterward (later
+# `vet_date`s, e.g. design-md 2026-08-10, show-me 2026-08-18) are vetted
+# inline via direct fetch at the time they're added — their own `notes`
+# field is the trail for those, not a RESEARCH.md section.
 
 version: "5.0.0"
 
@@ -233,7 +236,7 @@ skills:
     source: "https://github.com/trailofbits/skills"
     stars: 6393
     license: "CC-BY-SA-4.0 (unusual for code — check compatibility before adopting)"
-    vet_date: "2026-08-02"
+    vet_date: "2026-08-10"
     notes: >
       Real independent security research firm (Trail of Bits). Triage
       subagent reads source to classify findings, not just runs the tool.
@@ -242,7 +245,21 @@ skills:
       fixed — trailofbits/skills#51/#52), versus semgrep-guardian's two
       open, unfixed Windows bugs. Ships a skill named `semgrep` — same name
       as semgrep-guardian's; do not install both (see semgrep-guardian
-      notes for the collision evidence).
+      notes for the collision evidence). Install both plugins from this
+      repo: `static-analysis` (CodeQL + Semgrep scanning) and `fp-check`
+      (true/false-positive triage — split out of `static-analysis` into
+      its own plugin; installing only `static-analysis` gets scanning with
+      no triage) — see `rules/engineering.md`'s "Static analysis" section.
+      Re-audited 2026-08-10 for supply-chain drift since original vetting —
+      none found (commit signing, protected branch, CODEOWNERS requiring
+      TOB core review, verified via `gh api`). `fp-check` ships a Stop hook
+      that can block session end — same blocking-primitive class
+      semgrep-guardian is rejected for above. Unverified whether plugin
+      install auto-registers a plugin's `hooks.json` into `settings.json`
+      on this platform — don't assume "install the plugin, skip the hook"
+      happens without checking. After installing, inspect `settings.json`
+      for a `fp-check` Stop hook entry and remove it if present, keeping
+      the triage agents only.
 
   # ── Dependency / tech-debt ──────────────────────────────────────────────
   - name: managing-dependencies
@@ -654,13 +671,16 @@ known_issues:
     issue: "Cosmetic, non-blocking SessionStart error on Windows (obra/superpowers#1554, open)."
   - entry: "memory layer (memory/SPEC.md)"
     issue: >
-      SessionEnd — the hook the global-scope rotation design depends on —
-      is confirmed to NOT fire on the `/exit` command (the standard way to
-      end a session). anthropics/claude-code#35892, closed `not_planned`
-      (permanent, not a bug awaiting a fix). This breaks "global scope:
-      rotate live checkpoint to archive on SessionEnd" for the common case.
-      Needs a redesign: check checkpoint staleness at SessionStart instead
-      of relying on SessionEnd firing. See memory/SPEC.md for the fix.
+      RESOLVED 2026-08-17, redesign fixed — kept here as the historical
+      record, not an open item. Original problem: SessionEnd — the hook
+      the global-scope rotation design depended on — is confirmed to NOT
+      fire on the `/exit` command (the standard way to end a session).
+      anthropics/claude-code#35892, closed `not_planned` (permanent, not a
+      bug awaiting a fix). Fix shipped: `memory/hooks/memory-init.js`
+      checks checkpoint staleness at SessionStart instead (session_id
+      mismatch -> inject then archive+delete), covered by
+      `memory/hooks/test/run.sh` tests 4-5 (23/23 passing as of 2026-08-18
+      health-check re-verification). See memory/SPEC.md for the design.
 
 # Confirmed real, actively reviewed, and rejected — kept here so a future
 # pass doesn't re-litigate these without cause. See skills/RESEARCH.md §6
@@ -672,3 +692,22 @@ reviewed_rejected:
   - name: wevi.ai
     source: "https://wevi.ai"
     reason: "Pre-launch (email-signup only), proprietary, zero API/MCP/CLI surface, thin credibility signals."
+  - name: show-me
+    source: "https://github.com/charlie947/show-me"
+    vet_date: "2026-08-18"
+    reason: >
+      Founder-submitted (via charliehills.substack.com/p/html-md, cited for
+      its "Markdown in, HTML out" deliverable-format rule — adopted, see
+      WORKFLOW.md's Communication baseline). CORRECTED same day: an earlier
+      draft of this entry cited the wrong repo (mbailey/show-me, an
+      unrelated tmux+Neovim pane-display tool) — CodeRabbit's review-loop
+      pass caught the mismatch, re-verified via direct README fetch of the
+      article's actual linked repo. The real plugin is a single SKILL.md
+      (no hooks, no binaries) that renders visual content as self-contained
+      HTML and auto-opens it via `osascript` window activation — macOS-only.
+      10 stars, 1 fork, MIT. Not installed as a skill: its auto-open
+      mechanism doesn't port to this repo's native-Windows-PowerShell setup,
+      and the underlying rule is already captured as prose guidance in
+      WORKFLOW.md rather than a separate installable dependency —
+      `Start-Process` (native) + the `Artifact` tool (already available)
+      cover the "view the rendered file before calling it done" step here.
