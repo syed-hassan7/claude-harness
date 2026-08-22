@@ -8,6 +8,8 @@
 # `vet_date`s, e.g. design-md 2026-08-10, show-me 2026-08-18) are vetted
 # inline via direct fetch at the time they're added — their own `notes`
 # field is the trail for those, not a RESEARCH.md section.
+#
+# Drift canary applies to this file — see WORKFLOW.md's "Drift canary" note.
 
 version: "5.0.0"
 
@@ -425,6 +427,31 @@ skills:
     vet_date: "2026-08-02"
     notes: "Overlaps with impeccable — kept as secondary/reference, not both required."
 
+  - name: anti-slop
+    role: "Anti-slop rule-gate filter — 38 tiered rules + mandatory PASS/FAIL Delivery Gate report"
+    required: false
+    trigger: "ui"
+    source: "https://github.com/miqdadbadjuber/anti-slop"
+    stars: 470
+    license: "MIT"
+    vet_date: "2026-08-22"
+    notes: >
+      Zarak-submitted via a mcpmarket.com listing that would not load directly
+      (Vercel bot-protection checkpoint on every fetch attempt) -- matched to
+      this repo by content fingerprint (the listing's described "R-01 to R-38
+      rules... Hard Gate/Purpose-Gate/Quality Locks... Delivery Gate" language
+      verbatim in this repo's own README, fetched directly) and cited from
+      that primary source, not from mcpmarket.com itself -- do not cite
+      mcpmarket.com as the source in any future pass. Complements impeccable
+      rather than overlapping it (unlike hallmark, above): its own README
+      calls it "a filter, not a style guide" -- no prescribed colors/fonts/
+      layouts, just a rule-tiered gate + a shippable PASS/FAIL report, wired
+      into design-lane.md step 7 alongside the render-before-judging
+      screenshot gate. Young project (created 2026-08-07, ~2 weeks old at
+      vet_date) -- MIT, real content, active (pushed 2026-08-20) -- re-audit
+      supply-chain signals at next check-in rather than treating this vet as
+      permanent the way a multi-year repo's would be.
+
   - name: shadcn-mcp
     role: "Component search against any shadcn-compatible registry"
     required: false
@@ -457,6 +484,72 @@ skills:
     license: "MIT"
     vet_date: "2026-08-02"
     notes: "Same shadcn-registry install path as kokonutui. Complements the bundled dataviz skill for chart-heavy UI work."
+
+  - name: react-bits
+    role: "Pre-built animated/personality component library — complements shadcn-mcp/kokonutui for motion-heavy components instead of hand-assembling from Motion/Anime.js primitives"
+    required: false
+    trigger: "ui + component needs built-in animation/personality (not charts — see bklit-ui)"
+    source: "https://github.com/DavidHDev/react-bits"
+    stars: 45969
+    license: "MIT + Commons Clause License Condition v1.0 (custom, not a standard SPDX license — gh api reports NOASSERTION; verified via raw LICENSE.md fetch, not the README's shorthand claim)"
+    vet_date: "2026-08-22"
+    notes: >
+      Sourced from a Raha (YC Head of Design) "how to design with AI"
+      walkthrough that named it alongside shadcn/ui as a component library to
+      point an agent at, so it stops inventing its own — see
+      rules/design-lane.md's "Benchmarked against an external methodology"
+      note. Verified via gh api directly: 45,969 stars / 2,200 forks / 8 open
+      issues, pushed 2026-08-15 (active). License permits commercial use "as
+      part of an application, website, or product" but forbids reselling or
+      redistributing the components themselves, alone or bundled — fine for
+      building this org's own products, not for repackaging the library.
+      Installs as a standalone npm package / copy-paste component set
+      (reactbits.dev) — does NOT ride the shadcn-registry mechanism
+      kokonutui/bklit-ui use; confirm its own install path before assuming
+      components.json wiring applies.
+
+  - name: agentation
+    role: "Visual feedback tool — click a rendered element, annotate it, hand the agent its exact selector/position instead of a prose description"
+    required: false
+    trigger: "ui + iterating on already-rendered UI (pairs with design-lane.md step 7's render-before-judging gate)"
+    source: "https://github.com/benjitaylor/agentation"
+    stars: 4412
+    license: "PolyForm Shield 1.0.0 (noncompete clause, not OSI-standard — verified via raw LICENSE fetch: cannot be used to build a product/service that competes with Agentation itself; fine for this org's own internal/product UI work)"
+    vet_date: "2026-08-22"
+    notes: >
+      Sourced from the same Raha walkthrough as react-bits — built by Benji
+      Taylor (head of design at X). Verified via gh api directly: 4,412
+      stars / 344 forks / 55 open issues, but pushed_at 2026-06-07 — over 2
+      months stale as of this vet_date, recheck maintenance activity before
+      treating as a long-term pick. Core npm package (React 18+, dev
+      dependency, zero runtime deps) is copy-paste markdown output — click
+      an element, get a selector/position block to paste into chat.
+      Third-party coverage (blog posts, aitoolly.com) claims real-time MCP
+      integration, but this is NOT confirmed in the package's own README —
+      do not treat "agents can read your annotations in real time" as
+      verified until the MCP surface itself is found and fetched directly.
+
+  - name: diagram-design
+    role: "Editorial-quality architecture/flowchart/sequence diagrams, self-contained HTML+SVG, no build step"
+    required: false
+    trigger: "diagram"
+    source: "https://github.com/cathrynlavery/diagram-design"
+    stars: 25238
+    license: "MIT"
+    vet_date: "2026-08-22"
+    notes: >
+      Zarak-submitted. Verified via gh api directly, not secondhand fetch:
+      25,238 stars / 1,546 forks / 25 contributors match the repo's actual
+      metadata exactly (an earlier WebFetch summary of these same numbers was
+      treated with suspicion before this check -- unwarranted this time, the
+      numbers held up). No npm/install surface at all -- Python/HTML/SVG,
+      offline, Playwright only for optional PNG export -- lowest-risk
+      candidate audited this pass. 39 diagram types, brand color/font
+      extraction from a live site, draw.io/Mermaid import. Complements
+      dataviz/bklit-ui (charts) rather than overlapping -- this is
+      architecture/flowchart/sequence diagrams, a different content type.
+      Not wired into rules/design-lane.md (that file is UI-code-specific);
+      trigger on diagram-shaped tasks directly.
 
   - name: figma-mcp
     role: "Figma Dev Mode MCP — design file inspection"
@@ -639,6 +732,8 @@ unverified_excluded:
     reason: "No canonical fetchable GitHub repo found — only a third-party curated-list PR and marketing pages. Excluded until a real source repo surfaces."
   - name: design-tokens-mcp
     reason: "No candidate clears an official/high-trust bar (best found: 4-25 stars, inconsistent maintenance). Open gap, not a solved category."
+  - name: interior.dev
+    reason: "Zarak-submitted (via the Raha 'How to Design With AI' Notion doc, alongside react-bits/agentation, both adopted above). No canonical source found under this name — no repo, no site, no press hit despite extensive search. Not re-proposed without a direct working link."
 
 # Libraries, not skills: no agent-installable wrapper exists, so they don't
 # get a `skills:` entry — an agent imports/writes code against them like any
@@ -711,3 +806,40 @@ reviewed_rejected:
       WORKFLOW.md rather than a separate installable dependency —
       `Start-Process` (native) + the `Artifact` tool (already available)
       cover the "view the rendered file before calling it done" step here.
+  - name: hyperframes
+    source: "https://github.com/heygen-com/hyperframes"
+    vet_date: "2026-08-22"
+    reason: >
+      Zarak-submitted. Not a safety rejection — passes hygiene (verified via
+      gh api directly: 42,058 stars / 4,027 forks / 30 contributors / active,
+      pushed same day as this check; CodeQL workflow running; proper
+      SECURITY.md; no pre/postinstall lifecycle scripts in package.json).
+      Out of scope: it's an HTML-to-MP4 video-rendering framework (FFmpeg +
+      Puppeteer/Chromium + Git LFS + Docker for regression baselines,
+      ~400MB monorepo) for motion-graphics/video generation, not UI code —
+      doesn't touch the "boring frontend" problem this vetting pass was
+      actually run for. No video/motion-graphics task shape exists anywhere
+      in this pack to trigger it on. Revisit if one does.
+  - name: frontend-design (anthropics/skills)
+    source: "https://github.com/anthropics/skills (path: skills/frontend-design/SKILL.md)"
+    vet_date: "2026-08-22"
+    reason: >
+      Real, official, actively maintained (170,938 stars on the parent repo)
+      — not rejected for being fake or unsafe, documented here so its
+      now-retired mechanism doesn't get re-cited as current by a future
+      pass. The 2025-12-04 → 2026-06-09 version (replaced at commit
+      `2235be7`) forced a 4-question purpose/tone/constraints/
+      differentiation framework, a named-extreme aesthetic commitment
+      (brutalist/maximalist/retro-futuristic/luxury/…), and an explicit font
+      blocklist (Inter, Roboto, Arial, system fonts, Space Grotesk) — exactly
+      what independent blog posts (medium.com, chaseai.io, theadpharm.com,
+      thomas-wiegold.com) describe as this skill's current behavior. It
+      isn't current: the live `SKILL.md`, fetched directly (not taken from
+      the blogs), now uses looser prose with no font blocklist and no forced
+      named extreme. The mechanism itself was real and worth keeping — it's
+      adopted as native prose in `rules/design-lane.md` step 2 instead of an
+      installable dependency on this skill, specifically so it can't be lost
+      again if Anthropic's version drifts a second time. Third-party
+      install-count claims ("277k+," "796k+," from Skillselion/
+      officialskills.sh) could not be verified against any primary source
+      Anthropic exposes and are not repeated as fact anywhere in this pack.

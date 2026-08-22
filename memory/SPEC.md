@@ -39,6 +39,8 @@ Scope detection at `SessionStart`: walk cwd → ancestors for a `.git` directory
 | `PreCompact` | — | Archive the current live checkpoint (timestamped copy into scope's archive dir) *before* Claude Code compacts, so nothing is lost. Then refresh the live checkpoint with a compressed summary of what's about to be compacted away. |
 | `PostCompact` | — | Optional: re-inject the freshly archived checkpoint reference so post-compaction context has an explicit pointer back to it. |
 | `SessionEnd` | — | Best-effort final write only, not load-bearing (confirmed unreliable — doesn't fire on `/exit`, see correction above). Project scope: live checkpoint simply persists regardless (subject to the 10-checkpoint/7-day trim, which runs on `PreCompact`/next `SessionStart`, not `SessionEnd`). |
+| `UserPromptSubmit` | — (no matcher support for this event) | `memory-recall.js` — architecture-memory only, not checkpoints/lessons. Mechanically greps the raw prompt text against every architecture note's `tags`/`project` columns (project + global index, both scopes); on a match, injects the matched note's full `## Summary`/`## Detail` content via `hookSpecificOutput.additionalContext`. Fires on every single prompt — verified against Claude Code's own hooks-guide.md that this event has no matcher and always fires, so this hook must stay cheap (index reads only, no directory scans). |
+| `PostToolUse` (2nd registration) | `Read\|Edit\|Write` | `memory-architecture.js` — architecture-memory only, separate hook file and separate matcher from the checkpoint hook's `Edit\|Write` registration above (Claude Code runs both; they don't conflict). Looks up the touched file's repo-relative path in `watch-map.json`; on a match, injects the linked note's `## Summary` via a **flat top-level** `additionalContext` field (verified: PostToolUse's output shape is NOT nested under `hookSpecificOutput`, unlike `SessionStart`/`UserPromptSubmit` — confirmed against code.claude.com/docs/en/hooks.md). On `Edit`/`Write` specifically (not `Read`), also flags the note `possibly-stale` and prefixes its `architecture/index.md` line with `[STALE?]`. Global scope is a no-op here (`watch_files` are repo-relative; no meaningful match without a repo). |
 
 **Design principle:** hooks do the work; rules (`WORKFLOW.md`, this file) tell the agent what was injected and how to use it. The user never runs a memory-specific slash command in normal use.
 
@@ -149,6 +151,113 @@ Only a correction that survives all five gets written down. This is agent-judgme
 ### Considered and deferred: a durable user-profile file
 
 `NousResearch/hermes-agent` splits its memory into `MEMORY.md` (agent notes) and `USER.md` (durable user profile — preferences, communication style — distinct from both session-scoped checkpoints and correction-scoped lessons). Considered adding an equivalent global-only sibling file here, 2026-08-11, and deferred: for a Claude-Code-only user, this would be a third store for content already covered by Claude Code's own native per-user memory and by `~/.claude/CLAUDE.md`'s standing preferences section, with no write trigger distinguishing it from either. The portability case (Cursor/Codex don't get Claude Code's native memory) doesn't hold today — those adapters are named as a future ambition in this repo's own README, not shipped. Revisit if/when a non-Claude-Code adapter actually ships; don't build the file or its `memory-init.js` injection block before then.
+
+## Project-architecture memory (self-improving structural knowledge)
+
+**Status: designed 2026-08-22, hooks implemented same day** (`memory-recall.js`, `memory-architecture.js`, plus the injection blocks in `memory-init.js` — see the hook table above). Design produced by a 4-lens judge-panel workflow (durability-first, retrieval-precision-first, YAGNI-first, architecture-drift-first — one agent per lens, independently, then synthesized), finalized against Zarak directly on the open questions the synthesis left. One of the four lens agents (durability-first) returned no usable content and was excluded rather than smoothed over; the design below rests on the other three, which converged. All file:line citations below were spot-checked directly against `_lib.js`/`memory-init.js`/`memory-compact.js`/`lesson.md` before being written down here — not taken on the synthesis agent's word (this pack's own "vetted, not vibed" standard applies to internal design work, not just external repos). Note creation/supersession (the write side) stays agent-judgment-only, same as lessons — no hook authors note content; only recall and staleness-flagging are mechanical.
+
+**Correction vs. the original design, made while implementing:** the original synthesis assumed recall had to be a `WORKFLOW.md` prose rule (inline agent judgment on every message), because no hook was believed able to see the user's message text or inject context mid-conversation beyond `SessionStart`. That assumption was wrong — checked directly against Claude Code's own hooks documentation before writing any code: `UserPromptSubmit` *can* return `hookSpecificOutput.additionalContext` on every single turn (input field is literally named `prompt`), and `PostToolUse` *can* return a flat top-level `additionalContext` after any tool call, including `Read`. Both are implemented as real hooks (`memory-recall.js`, `memory-architecture.js`) instead of a prose rule — recall for this store is now **mechanical, not agent-judgment**, closing the reliability gap ("agent happened to notice") more completely than the original synthesis thought was possible. The directory-grep fallback described below is now a true fallback (index/hook missed it), not the primary mechanism.
+
+**The gap this closes:** none of checkpoints, lessons, or Zarak's separate native Claude Code auto-memory (typed `user`/`feedback`/`project`/`reference` files indexed in his own `MEMORY.md`) capture project *architecture* — the shape of a codebase, why a structural decision was made, a standing invariant — in a form that (a) survives past a checkpoint's trim window, (b) has a defined correction path as the real code changes instead of going stale silently, and (c) gets recalled in non-project/global scenarios via something more rigorous than an agent noticing a prose description was relevant.
+
+**Why a new store, not an extension of #1/#2/#3:** checkpoints are *deliberately* trimmed (10 checkpoints/7 days project, last-session-only global — this file's "Two scopes" table above) — architecture facts must outlive that trim by design, so they structurally cannot live there. Lessons are *definitionally* corrections about agent behavior, and the write gate's first three tests (this file's "Two triggers" section above) require a triggering user-message to run against — a fact learned by reading code has no such message, so forcing it through would blur a gate tuned specifically to catch corrections. Zarak's native global auto-memory has no verified write contract a third-party hook can safely mutate (no confirmed guarantee against Claude Code's own memory management reading/writing concurrently) and no explicit keyword/tag field today — kept as an optional read-side pointer only (see "Cross-link," below), never the store. The new store reuses every existing mechanism verbatim (`resolveScope()`, `atomicWrite`/lock, `SessionStart` injection, byte-cap-with-loud-truncation, strikethrough supersession) — new content and a new directory, not new machinery.
+
+### Schema
+
+Sibling to `session/` and `lessons/` under the same `base` `resolveScope()` already returns (`_lib.js`'s `resolveScope`, confirmed lines 53-58):
+
+```
+<base>/architecture/
+  index.md              # flat, one line per note, byte-capped injection (see Recall, below)
+  watch-map.json         # sidecar: {"relative/path.ts": ["note-id-1", "note-id-2"]} — kept in
+                          # sync whenever a note's watch_files changes, so the PostToolUse
+                          # staleness hook does one O(1) lookup, never a directory scan
+  notes/
+    <id>.md              # one file per note
+```
+
+Note frontmatter + body:
+
+```
+# Architecture note
+id: <short-kebab-slug, unique within scope>
+scope: project | global
+repo: <name or null>
+project: <canonical project name, e.g. VenderScope, ContraAI, tender-review-assistant,
+          claude-harness — REQUIRED even at scope:project, so global cross-project recall
+          has a stable string independent of the local repo dirname>
+component: <optional short label, e.g. auth, db-layer — organizing hint, not the recall field>
+tags: <comma-separated literal keywords: codebase names, aliases, common misspellings — drawn
+       from the codebase itself where possible, not invented vocabulary. The only field the
+       recall rule matches against.>
+watch_files:
+  - <repo-relative path; editing this path mechanically flags this note possibly-stale>
+created: <ISO8601>
+updated: <ISO8601>
+status: current | possibly-stale | superseded
+index_line: <exact line injected: id | project | tags | one-line summary | path>
+
+## Summary
+<the structural fact / invariant / why-decision, 1-2 sentences>
+
+## Detail
+<fuller explanation, read on demand only — same injected-index/full-file-on-demand split as
+lesson.md's index_line/## Incident>
+
+## Verified against
+<encouraged, not gating: file:line(s) or commit sha where this was confirmed true when
+captured — gives a later session something concrete to spot-check instead of a disclaimer>
+
+## Staleness check
+<blank until PostToolUse flags it:>
+<!-- possibly-stale-since: <ISO8601> — edited: <path> -->
+
+## Superseded
+<omitted unless invalidated. Identical discipline to lesson.md:17-20:>
+<!-- superseded: <ISO8601> — reason -->
+~~<original summary text>~~
+```
+
+### Write trigger
+
+Content (`id`/`tags`/`project`/`Summary`/`Detail`) is agent-judgment only, inline at the moment — identical posture to why lessons are agent-judgment (no hook receives conversation content, so nothing but the agent's own reasoning can tell "architecture-worthy" from "routine"). Four pre-write gates, adapted from the lesson gate's shape but pointed at this content type:
+
+1. **Differentiation test** — is this ACTIVITY (→ `checkpoint.md`) or a CORRECTION about agent behavior (→ a lesson)? Either → redirect, don't write here.
+2. **Durability test** — will this still be true next month, not just this session.
+3. **Duplicate check** — grep this scope's `architecture/index.md` before writing; if an existing note covers the same subsystem, supersede in place rather than duplicate.
+4. **Tag-collision check** — grep the *global* index for a tag already claimed by a different `project` value; require disambiguation before writing. Without this gate, a near-duplicate tag (e.g. "postgres" loosely covering both VenderScope's and a future ContraAI project's Postgres setup) doesn't produce a missed recall — it produces a note read and answered from with full confidence, for the *wrong* project. This gate is agent-judgment, not hook-enforced; it catches exact-string collisions via grep but not near-duplicates or synonymous-but-differently-spelled tags — a residual risk, not a solved one.
+
+**When a note lists `watch_files`, the agent must also add each path to `architecture/watch-map.json`** (`{"relative/path.ts": ["note-id", ...]}`) in the same write — this sidecar is not hook-maintained, nothing else keeps it in sync, and `memory-architecture.js` (below) silently finds nothing to flag if it's skipped. Same failure shape as the keyword-discipline risk already named in Risks: nothing mechanically enforces this either.
+
+**Mechanical (`PostToolUse`, matcher `Read\|Edit\|Write`, implemented as `memory-architecture.js`) — staleness flagging AND file-touch recall, never content-authoring:** reads `watch-map.json`, string-matches `tool_input.file_path` (converted to repo-relative) against its keys — an O(1) lookup, not a per-edit scan of every note's `watch_files`, same hot-path constraint that already shaped why `goal`/`next`/`decisions` aren't auto-refreshed. On any matched `Read`/`Edit`/`Write`, injects the linked note's `## Summary` as context (see Recall, below). On `Edit`/`Write` specifically, additionally appends a `possibly-stale-since` HTML comment to each matched note via the existing `atomicWrite`/lock path and flips its `status` to `possibly-stale`, then prefixes its `architecture/index.md` line with `[STALE?]` (`lib.flagIndexLineStale`) so the flag is visible at the next ambient injection without a live status read.
+
+### Recall (read trigger) — three layers, implemented
+
+**Layer 1 — ambient index (`SessionStart`, `memory-init.js`).** Project scope: a fourth injection block, alongside the existing checkpoint/archive-index/lessons-index blocks, reads `<repo>/.claude/architecture/index.md` the same way the lessons index is read today — byte-capped at **8000 bytes**, matching `LESSONS_INDEX_CAP_BYTES`, same loud-truncation-note behavior on overflow. Global scope: same mechanism, one file (base already is the home dir), same 8000-byte cap since there's no split cost with a project index in this scope. `possibly-stale` entries are prefixed `[STALE?]` inline so distrust is visible without opening the file; `superseded` entries are never in `index.md` at all (see Retention, below), so they can't surface here. Project scope *also* injects the global `~/.claude/architecture/index.md` unconditionally — capped at a **smaller 2000 bytes**, not the 8000-byte project cap, because this one is paid every session regardless of whether the current task needs cross-project recall at all (worked example below). This layer gives ambient awareness of what exists; it does not by itself answer a question.
+
+**Layer 2 — mechanical per-prompt recall (`UserPromptSubmit`, `memory-recall.js`, implemented).** On every single prompt, greps the raw message text against every pooled index entry's `tags`/`project` columns (project index + global index, both scopes — same pooling as Layer 1). On a match, reads the matched note(s) directly off disk and injects their full `## Summary`/`## Detail` content via `hookSpecificOutput.additionalContext` — not just the one-line index summary. Bounded to 3 notes per prompt. This is the mechanism that actually answers Zarak's original ask ("recall shouldn't depend on the agent happening to notice") — it is deterministic and hook-enforced, not agent-judgment.
+
+**Layer 3 — mechanical file-touch recall (`PostToolUse`, matcher `Read\|Edit\|Write`, `memory-architecture.js`, implemented).** On every `Read`/`Edit`/`Write`, looks up the touched file's repo-relative path in `<repo>/.claude/architecture/watch-map.json`; on a match, injects the linked note's `## Summary` via a flat top-level `additionalContext` (PostToolUse's output shape — confirmed NOT nested under `hookSpecificOutput`, unlike Layers 1–2). This is the "touching a file surfaces its architecture note" behavior Zarak asked about directly — genuinely new versus the original synthesis, which had no mechanism for this at all (see the correction note above). Project scope only; `watch_files` are repo-relative and have no meaningful match without a repo.
+
+**Fallback — agent judgment (`WORKFLOW.md`-level, not a hook), only reached when Layers 1–3 miss.** If none of the mechanical layers surfaced a plausible match (e.g. the user's phrasing shares no literal token with any `tags`/`project` value), fall back to grepping `architecture/notes/`'s frontmatter directly before concluding nothing exists — but **skip any note with `status: superseded`** in that fallback grep, the same way superseded entries are excluded from `index.md`, or a struck-through fact can still surface as a false-confident answer via the directory fallback alone. This is now a true fallback for the mechanical layers' blind spot (non-literal phrasing), not the primary recall path the original synthesis assumed it had to be.
+
+**Token-cost worked example, at the caps above:** project index (8000 bytes) + global index (2000 bytes) adds up to ~10000 bytes (~2500 tokens, rough 4-chars/token estimate) to every `SessionStart` in project scope, on top of the checkpoint + archive index + existing 8000-byte lessons cap already injected today. `memory-recall.js`'s per-prompt matches add on top of that only when something actually matches (bounded to 3 notes). Actual injected size will be far under cap early on (few notes), so this is a worst-case ceiling, not a typical cost — but it's the number the "is this worth it" call in the open-questions round was actually about.
+
+**WATCH — global-index injection cost, not yet a problem, named revisit trigger (same house style as this file's SQLite-FTS5 entry above):** revisit *whether* the global index should stay unconditional (vs. gated behind some cheaper heuristic) only if real cross-project note volume grows enough that the 2000-byte cap starts truncating regularly, or if the fixed per-session cost is reported as noticeable in sessions that never use cross-project recall. Not built as adaptive/conditional injection speculatively — that's the same YAGNI discipline this file already applies to SQLite-FTS5.
+
+### Staleness — v1 only, v2 deferred
+
+**v1 (this spec, build now):** the `watch_files` → `possibly-stale-since` mechanical flag described above, surfaced as `[STALE?]` at injection. On next contact with a flagged note, the agent resolves it — never a hook — by re-reading the current state of the watched file(s), then either clearing the flag (bump `updated`, drop the marker) if the fact still holds, or superseding it with the exact strikethrough + HTML-comment discipline lessons already use: never a silent overwrite, never a deletion.
+
+**v2 (named, deferred, not built):** an optional `verify:` block (`method: file_exists | grep_count | glob_count | grep_absent`, `target`, `pattern`, `expect`) that would re-run automatically every `SessionStart` for claims that reduce to a mechanical check, flipping a `verified | drifted | unchecked` status with an appended history line — strictly stronger than v1's reactive flag (catches drift even when no edit touched a `watch_files` path), but requires building full recipe-execution machinery before any of this ships. **Revisit condition:** adopt v2 if v1's flag is repeatedly observed either firing without real signal (trips on every edit to a broad watched file, but the invariant never actually breaks) or missing real drift (the invariant breaks without any watched file changing) often enough in practice to justify the build. A shipped `verify:` recipe is also a known risk in its own right, not just an upgrade: a shallow grep/glob pattern can report `status: verified` while the actual invariant is violated through a path the pattern never anticipated (a renamed helper, a differently-aliased client) — a green check reads as *more* trustworthy than an unverified doc precisely because it looks actively checked, so nobody thinks to distrust it the way they would a stale doc with no verification story at all. Worth knowing before v2 is ever built, not just after.
+
+### Retention
+
+No time-based trim, no rotation code — disk size isn't the real cost here (notes are read on demand; they cost nothing sitting on disk). The actual risks are (a) a superseded note still matching a keyword grep → confidently wrong recall, and (b) index-line proliferation eating the byte cap → `tags` clauses get truncated off older entries, degrading recall. Both are closed by one rule, folded into the supersession action that already has to happen: **on supersession, remove the note's line from `index.md`; keep the `.md` file on disk forever** (git-diffable history, consistent with this file's existing supersession-not-deletion discipline for lessons). This is why the recall fallback above explicitly excludes `status: superseded` from the directory grep — removing the index line alone isn't sufficient once a fallback path exists that reads the directory directly.
+
+### Cross-link to Zarak's native auto-memory
+
+An architecture note may be pointed at from an existing entry in Zarak's global `MEMORY.md` (one extra line naming the note's id/path, using that system's own `[[name]]` cross-reference convention) — **agent-authored only, at note-creation time, through the same write path the agent already uses to edit `MEMORY.md` today.** Never written by `memory-checkpoint.js`, `memory-init.js`, or any other hook in this pack — that hook-mediated path is what carried the real risk (no verified guarantee against Claude Code's own memory management concurrently reading/rewriting that file), and this scopes the cross-link to avoid it entirely rather than skip the feature outright.
 
 ## Concurrency
 

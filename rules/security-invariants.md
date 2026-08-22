@@ -4,6 +4,8 @@ These rules govern the agent on **every session, every surface** it actually run
 
 Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) blocks writes matching secret patterns. Rules below are the full contract; the hook enforces the subset it can check mechanically.
 
+*Drift canary applies to this file — see `WORKFLOW.md`'s "Drift canary" note. Exception: the Auto-Clarity carve-out already pulls security warnings out of caveman mode, and the canary must not delay or dilute a live warning — name Zarak in the same breath, never instead of the warning.*
+
 ---
 
 ## Tier 0 — Secrets (hard stop, no exceptions)

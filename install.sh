@@ -112,10 +112,18 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
 [claude-harness] Add this to ~/.claude/settings.json under "hooks" (MERGE into
 existing arrays — e.g. your SessionStart array already has other hooks,
 append to it, don't replace it):
-  "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-init.js\"", "timeout": 5 }] }]
-  "PostToolUse":  [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] }]
-  "PreCompact":   [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
-  "SessionEnd":   [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-flush.js\"", "timeout": 5 }] }]
+  "SessionStart":     [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-init.js\"", "timeout": 5 }] }]
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-recall.js\"", "timeout": 5 }] }]
+  "PostToolUse":      [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] },
+                        { "matcher": "Read|Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-architecture.js\"", "timeout": 5 }] }]
+  "PreCompact":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
+  "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-flush.js\"", "timeout": 5 }] }]
+memory-recall.js and memory-architecture.js implement project-architecture
+memory (memory/SPEC.md's "Project-architecture memory" section) -- mechanical
+keyword recall on every prompt + file-touch recall/staleness-flagging on every
+Read/Edit/Write. Note memory-recall.js's UserPromptSubmit registration is a
+SEPARATE array entry from caveman's own UserPromptSubmit hook below -- Claude
+Code runs all matching hooks for an event, this does not replace that one.
 Opt-in for a reason — new code, low-volume real-world testing so far. See memory/SPEC.md.
 EOF
 elif [ -d "$PACK_DIR/memory/hooks" ]; then

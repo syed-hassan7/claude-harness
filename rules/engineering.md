@@ -4,6 +4,8 @@ Claude Harness's engineering lane is **Ponytail's YAGNI ladder as the always-on 
 
 All of this is advisory prose, not a mechanical gate — no hook blocks a write for violating it.
 
+*Drift canary applies to this file — see `WORKFLOW.md`'s "Drift canary" note.*
+
 ## Baseline: Ponytail (always on)
 
 [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) — confirmed real (`skills/RESEARCH.md` §1: SKILL.md read directly, npm package `@dietrichgebert/ponytail`, ~20 agent adapters).

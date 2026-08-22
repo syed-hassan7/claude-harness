@@ -209,8 +209,99 @@ function serializeCheckpoint(cp) {
   return lines.join('\n') + '\n';
 }
 
+// ---- Project-architecture memory (memory/SPEC.md's "Project-architecture
+// memory" section) -- shared by memory-init.js, memory-recall.js, and
+// memory-architecture.js. Index line format: "[STALE?] id | project | tags |
+// summary | path", one per note, flat file at <base>/architecture/index.md.
+
+function parseArchIndexLine(line) {
+  const trimmed = (line || '').trim();
+  if (!trimmed) return null;
+  const stale = trimmed.startsWith('[STALE?]');
+  const body = stale ? trimmed.replace(/^\[STALE\?\]\s*/, '') : trimmed;
+  const parts = body.split('|').map((p) => p.trim());
+  if (parts.length < 5) return null;
+  const [id, project, tags, summary, notePath] = parts;
+  if (!id) return null;
+  return { id, project, tags, summary, path: notePath, stale };
+}
+
+function readArchIndexEntries(indexPath) {
+  if (!fs.existsSync(indexPath)) return [];
+  return fs
+    .readFileSync(indexPath, 'utf8')
+    .split(/\r?\n/)
+    .map(parseArchIndexLine)
+    .filter(Boolean);
+}
+
+// Literal, case-insensitive substring match against an entry's tags/project
+// columns -- the mechanical recall rule from SPEC.md, deliberately not
+// semantic/prose judgment (that's the whole point of this store vs #3's
+// existing "agent happened to notice the description" recall).
+function architectureEntryMatches(entry, text) {
+  if (!text) return false;
+  const hay = text.toLowerCase();
+  const needles = `${entry.project},${entry.tags}`
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 1);
+  return needles.some((n) => hay.includes(n));
+}
+
+// Plain line-scan, not a regex spanning the whole body -- avoids JS regex's
+// lack of a portable "end of string" anchor across engines.
+function extractSection(body, header) {
+  const lines = (body || '').split(/\r?\n/);
+  const startIdx = lines.findIndex((l) => l.trim() === `## ${header}`);
+  if (startIdx === -1) return '';
+  let end = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines
+    .slice(startIdx + 1, end)
+    .join('\n')
+    .trim();
+}
+
+function readWatchMap(base) {
+  const p = path.join(base, 'architecture', 'watch-map.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+// Prefixes the matching index line with "[STALE?] " (idempotent -- no-op if
+// already prefixed). Caller is responsible for holding the architecture lock;
+// this function only does the read-modify-write, same division of concerns
+// as atomicWrite/withLock above.
+function flagIndexLineStale(indexPath, noteId) {
+  if (!fs.existsSync(indexPath)) return false;
+  const lines = fs.readFileSync(indexPath, 'utf8').split(/\r?\n/);
+  let changed = false;
+  const out = lines.map((line) => {
+    if (!line.trim() || line.startsWith('[STALE?]')) return line;
+    const parsed = parseArchIndexLine(line);
+    if (parsed && parsed.id === noteId) {
+      changed = true;
+      return '[STALE?] ' + line.trim();
+    }
+    return line;
+  });
+  if (changed) atomicWrite(indexPath, out.join('\n'));
+  return changed;
+}
+
 module.exports = {
   readHookInput,
+  homeDir,
   walkForGitRoot,
   resolveScope,
   ensureDir,
@@ -223,4 +314,10 @@ module.exports = {
   withLock,
   parseCheckpoint,
   serializeCheckpoint,
+  parseArchIndexLine,
+  readArchIndexEntries,
+  architectureEntryMatches,
+  extractSection,
+  readWatchMap,
+  flagIndexLineStale,
 };

@@ -65,3 +65,7 @@ Example — destructive op:
 ## Boundaries
 
 Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
+
+## Drift canary exception
+
+`WORKFLOW.md`'s drift canary (name Zarak when actively applying a pack rule/skill) survives compression at every intensity level, ultra included — it's signal, not filler. Don't strip it chasing token count.

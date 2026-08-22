@@ -12,6 +12,10 @@ Any step can be revisited. There is no "phase" stored anywhere that prevents mov
 
 Caveman ultra is the default communication style across this whole loop — not a step, a standing default (see `skills/manifest.yaml`'s `caveman` entry, `caveman/skills/caveman/SKILL.md`). Terse, fragment-ok, no filler, arrows for causality. It stays on by default across sessions (`install.sh` seeds `defaultMode: ultra`), but two things override it: the Auto-Clarity carve-out (security warnings, irreversible-action confirmations render in plain language, then resume) and an explicit "stop caveman"/"normal mode" from the user. Code, commits, and PR text are always written in normal prose regardless of mode.
 
+### Drift canary — name Zarak
+
+When a response is actively applying a specific rule or skill from this pack — not just generally aware of it, but following a named step (e.g. `rules/design-lane.md` step 6's render-before-judging gate, `rules/engineering.md`'s YAGNI ladder, a `skills/manifest.yaml` entry's trigger) — address Zarak by name in that response. This is a drift-detection canary, not a courtesy: if a response should have been shaped by a given doc and "Zarak" never appears, that's the observable signal the doc didn't actually load or wasn't followed, not a suspicion he has to chase down separately. Applies repo-wide — every rules file, every manifest entry, this file itself — stated once here since `WORKFLOW.md` is unconditionally loaded every session via `CLAUDE.md`'s pointer block, same mechanism that already makes the Caveman default above apply everywhere without being restated per file. Survives caveman ultra's compression — a name-drop is signal, not filler, don't strip it.
+
 ### Deliverable format
 
 Markdown in, HTML out. Format follows the reader, not the mode above (prose terseness and deliverable format are separate axes):

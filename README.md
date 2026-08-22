@@ -130,14 +130,17 @@ rules/
 └── security-invariants.md  One always-on invariant set, every session, every surface
 
 memory/
-├── SPEC.md                 Automatic dual-scope session checkpoints +
-│                           mistake-memory (the self-learning layer above)
-├── templates/              checkpoint.md, lesson.md schemas
+├── SPEC.md                 Automatic dual-scope session checkpoints,
+│                           mistake-memory, and project-architecture memory
+│                           (mechanical recall via UserPromptSubmit +
+│                           PostToolUse, not agent-judgment prose)
+├── templates/              checkpoint.md, lesson.md, architecture.md schemas
 └── hooks/                  Working, opt-in hook implementation — see
                              "Using it today" below (install.sh --with-memory-hooks)
-    └── test/run.sh         23-case suite incl. Windows lockfile concurrency,
-                             archive trim boundaries, stale-lock reclaim —
-                             run after touching anything under memory/hooks/
+    └── test/run.sh         30-case suite incl. Windows lockfile concurrency,
+                             archive trim boundaries, stale-lock reclaim,
+                             architecture-memory recall/staleness — run after
+                             touching anything under memory/hooks/
 
 skills/
 ├── manifest.yaml           48+ skills, 12 categories, portable contract

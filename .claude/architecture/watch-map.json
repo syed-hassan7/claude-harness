@@ -1,0 +1,5 @@
+{
+  "memory/hooks/memory-recall.js": ["architecture-memory-design"],
+  "memory/hooks/memory-architecture.js": ["architecture-memory-design"],
+  "memory/SPEC.md": ["architecture-memory-design"]
+}

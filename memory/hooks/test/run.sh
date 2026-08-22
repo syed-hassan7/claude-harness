@@ -181,7 +181,7 @@ CP2="$FAKE_HOME/.claude/session/checkpoint.md"
 grep -q "$FAKE_AWS_KEY" "$CP2" && fail "raw secret pattern leaked into checkpoint" || pass "secret pattern redacted"
 
 echo "=== Test 11: malformed / empty stdin never crashes a hook (fail-open) ==="
-for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js; do
+for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js; do
   (cd "$NONGIT_CWD" && echo "" | node "$HOOKS/$script") > "$WORK/hookout" 2>"$WORK/hookerr"
   CODE=$?
   [ "$CODE" -eq 0 ] || fail "$script exited nonzero ($CODE) on empty stdin: $(cat "$WORK/hookerr")"
@@ -340,6 +340,103 @@ done
 TRUNC_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$TRUNC_HOME" run_hook memory-init.js "$TRUNC_CWD" "{\"cwd\":\"$TRUNC_CWD\",\"session_id\":\"sT\"}")
 echo "$TRUNC_OUT" | grep -qE "truncated: [0-9]+ older entr(y|ies) cut" || fail "truncation note missing or not in the new loud format -- expected 'truncated: N older entries cut'"
 pass "lessons index truncation note reports a concrete dropped-entry count, not a silent pointer"
+
+echo "=== Test 21: memory-init.js injects project architecture index ==="
+ARCH_PROJECT_POSIX="$WORK/arch_project"
+mkdir -p "$ARCH_PROJECT_POSIX"
+(cd "$ARCH_PROJECT_POSIX" && git init -q)
+ARCH_PROJECT=$(win_path "$ARCH_PROJECT_POSIX")
+mkdir -p "$ARCH_PROJECT_POSIX/.claude/architecture/notes"
+echo "auth-flow | TestProj | auth, jwt, session | Auth uses JWT with 15min expiry | notes/auth-flow.md" > "$ARCH_PROJECT_POSIX/.claude/architecture/index.md"
+OUT=$(run_hook memory-init.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","session_id":"sArch"}')
+echo "$OUT" | grep -q "project architecture index" || fail "project architecture index block not injected"
+echo "$OUT" | grep -q "auth-flow" || fail "architecture index content missing from injection"
+pass "project architecture index injected at SessionStart"
+
+echo "=== Test 22: memory-recall.js -- tag match surfaces full note Summary+Detail ==="
+cat > "$ARCH_PROJECT_POSIX/.claude/architecture/notes/auth-flow.md" <<'EOF'
+# Architecture note
+id: auth-flow
+scope: project
+repo: arch_project
+project: TestProj
+component: auth
+tags: auth, jwt, session
+watch_files:
+  - src/auth.ts
+created: 2026-08-01T00:00:00.000Z
+updated: 2026-08-01T00:00:00.000Z
+status: current
+index_line: auth-flow | TestProj | auth, jwt, session | Auth uses JWT with 15min expiry | notes/auth-flow.md
+
+## Summary
+Auth uses JWT with 15min expiry, refreshed via httpOnly cookie.
+
+## Detail
+Chosen to avoid localStorage XSS exposure.
+
+## Staleness check
+
+## Superseded
+EOF
+OUT=$(run_hook memory-recall.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","prompt":"How does our jwt session expiry work?"}')
+echo "$OUT" | grep -q "auth-flow" || fail "matched note id missing from recall injection"
+echo "$OUT" | grep -q "avoid localStorage XSS" || fail "matched note Detail section missing -- recall injected index summary only, not full note"
+pass "memory-recall.js surfaces full note content on tag match"
+
+echo "=== Test 23: memory-recall.js -- no tag match -> empty output ==="
+OUT=$(run_hook memory-recall.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","prompt":"what is the weather like today"}')
+[ -z "$OUT" ] && pass "no output when prompt matches no tags" || fail "expected empty output, got: $OUT"
+
+echo "=== Test 24: memory-recall.js -- global index recall reachable from an unrelated project (cross-project ask) ==="
+mkdir -p "$FAKE_HOME/.claude/architecture/notes"
+echo "vendor-db | VenderScope | venderscope, postgres, pooling | Uses PgBouncer transaction pooling on Render | notes/vendor-db.md" > "$FAKE_HOME/.claude/architecture/index.md"
+cat > "$FAKE_HOME/.claude/architecture/notes/vendor-db.md" <<'EOF'
+# Architecture note
+id: vendor-db
+scope: global
+repo: null
+project: VenderScope
+tags: venderscope, postgres, pooling
+created: 2026-08-01T00:00:00.000Z
+updated: 2026-08-01T00:00:00.000Z
+status: current
+index_line: vendor-db | VenderScope | venderscope, postgres, pooling | Uses PgBouncer transaction pooling on Render | notes/vendor-db.md
+
+## Summary
+Uses PgBouncer transaction pooling on Render.
+
+## Detail
+Direct connections exhausted the free-tier limit under load.
+EOF
+OUT=$(run_hook memory-recall.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","prompt":"why is the postgres pooling misbehaving on VenderScope"}')
+echo "$OUT" | grep -q "vendor-db" || fail "cross-project global note not recalled while sitting inside an unrelated project"
+pass "global architecture index recalled from inside a different project's repo"
+
+echo "=== Test 25: memory-architecture.js -- Read of a watched file surfaces its note, no staleness flip ==="
+mkdir -p "$ARCH_PROJECT_POSIX/src"
+echo "// auth code" > "$ARCH_PROJECT_POSIX/src/auth.ts"
+cat > "$ARCH_PROJECT_POSIX/.claude/architecture/watch-map.json" <<EOF
+{"src/auth.ts": ["auth-flow"]}
+EOF
+AUTH_FILE="$ARCH_PROJECT/src/auth.ts"
+OUT=$(run_hook memory-architecture.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","tool_name":"Read","tool_input":{"file_path":"'"$AUTH_FILE"'"}}')
+echo "$OUT" | grep -q "auth-flow" || fail "Read of watched file did not surface its architecture note"
+grep -q "status: current" "$ARCH_PROJECT_POSIX/.claude/architecture/notes/auth-flow.md" || fail "Read incorrectly flagged the note stale (status changed)"
+pass "Read of watched file surfaces note, leaves status untouched"
+
+echo "=== Test 26: memory-architecture.js -- Edit of a watched file flags stale + prefixes index line ==="
+OUT=$(run_hook memory-architecture.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","tool_name":"Edit","tool_input":{"file_path":"'"$AUTH_FILE"'"}}')
+echo "$OUT" | grep -q "auth-flow" || fail "Edit of watched file did not surface its architecture note"
+grep -q "status: possibly-stale" "$ARCH_PROJECT_POSIX/.claude/architecture/notes/auth-flow.md" || fail "Edit did not flip note status to possibly-stale"
+grep -q "possibly-stale-since" "$ARCH_PROJECT_POSIX/.claude/architecture/notes/auth-flow.md" || fail "Edit did not append a possibly-stale-since marker"
+grep -q '^\[STALE?\] auth-flow' "$ARCH_PROJECT_POSIX/.claude/architecture/index.md" || fail "index.md line was not prefixed [STALE?] after edit"
+pass "Edit of watched file flags note stale and prefixes its index line"
+
+echo "=== Test 27: memory-architecture.js -- untracked file -> empty output, no crash ==="
+echo "// unrelated" > "$ARCH_PROJECT_POSIX/src/unrelated.ts"
+OUT=$(run_hook memory-architecture.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","tool_name":"Edit","tool_input":{"file_path":"'"$ARCH_PROJECT"'/src/unrelated.ts"}}')
+[ -z "$OUT" ] && pass "untracked file touch produces no output" || fail "expected empty output for untracked file, got: $OUT"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
