@@ -1,1 +1,1 @@
-[STALE?] architecture-memory-design | claude-harness | memory, architecture, recall, hooks, memory-recall, memory-architecture | Project-architecture recall is mechanical (3 hook layers), not agent-judgment prose | notes/architecture-memory-design.md
+architecture-memory-design | claude-harness | memory, architecture, recall, hooks, memory-recall, memory-architecture | Project-architecture recall is mechanical (3 hook layers), not agent-judgment prose | notes/architecture-memory-design.md

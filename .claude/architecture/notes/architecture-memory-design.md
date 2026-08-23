@@ -10,8 +10,8 @@ watch_files:
   - memory/hooks/memory-architecture.js
   - memory/SPEC.md
 created: 2026-08-22T00:00:00.000Z
-updated: 2026-08-22T00:00:00.000Z
-status: possibly-stale
+updated: 2026-08-23T00:00:00.000Z
+status: current
 index_line: architecture-memory-design | claude-harness | memory, architecture, recall, hooks, memory-recall, memory-architecture | Project-architecture recall is mechanical (3 hook layers), not agent-judgment prose | notes/architecture-memory-design.md
 
 ## Summary
@@ -21,9 +21,8 @@ Project-architecture recall is mechanical (3 hook layers: SessionStart ambient i
 Note-content authoring stays agent-judgment (gated, same posture as lessons) — only recall and staleness-flagging are hook-mechanical. See memory/SPEC.md's "Project-architecture memory" section for the full design and the correction note explaining why the original synthesis got this wrong.
 
 ## Verified against
-memory/hooks/memory-recall.js, memory/hooks/memory-architecture.js, memory/SPEC.md's "Recall (read trigger) — three layers, implemented" section, as of 2026-08-22.
+memory/hooks/memory-recall.js, memory/hooks/memory-architecture.js, memory/SPEC.md's "Recall (read trigger) — three layers, implemented" section, as of 2026-08-23. SPEC.md edit that tripped flag didn't touch 3-layer design -- confirmed line-for-line against both hook source files.
 
 ## Staleness check
 
-<!-- possibly-stale-since: 2026-08-22T12:07:53.794Z -- edited: memory/SPEC.md -->
 ## Superseded
