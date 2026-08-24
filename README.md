@@ -147,11 +147,11 @@ memory/
 ├── templates/              checkpoint.md, lesson.md, architecture.md schemas
 └── hooks/                  Working, opt-in hook implementation — see
                              "Using it today" below (install.sh --with-memory-hooks)
-    └── test/run.sh         35-case suite incl. Windows lockfile concurrency,
+    └── test/run.sh         36-case suite incl. Windows lockfile concurrency,
                              archive trim boundaries, stale-lock reclaim,
                              architecture-memory recall/staleness, canary-miss
-                             open/resolve/escalate — run after touching
-                             anything under memory/hooks/
+                             open/resolve/escalate/expire-on-prune — run
+                             after touching anything under memory/hooks/
 
 skills/
 ├── manifest.yaml           53 skills, 12 categories, portable contract (new: transitions-dev)
@@ -204,7 +204,7 @@ Copies `rules/`, `skills/`, `memory/`, and `WORKFLOW.md` into a namespaced `~/.c
 >
 > - **Doesn't touch `settings.json`.** That file holds your existing hooks config — auto-editing structured JSON next to hooks you already depend on is a real corruption risk for no real benefit. If no `statusLine` block is found, the script prints the exact JSON to add by hand (see `statusline/README.md`). The same applies to `--with-memory-hooks`: it copies the hook files and prints the settings.json snippet, but you paste it in yourself.
 > - **Doesn't copy `rules/security-invariants.md` verbatim into `CLAUDE.md`.** If your `CLAUDE.md` already has hand-written security rules, a blind verbatim append duplicates them under different wording — the opposite of this pack's zero-context-bloat pitch. The pointer block links to the canonical file instead; dedupe your existing prose against it yourself, on your own schedule.
-> - **Doesn't install memory hooks by default even with the flag copied.** They fire on every single Edit/Write once wired — new code, tested (35 cases incl. Windows lockfile concurrency, archive trim boundaries, stale-lock reclaim, architecture-memory recall/staleness, canary-miss open/resolve/escalate — see `memory/SPEC.md`), but "tested" and "proven in production" aren't the same claim. Wire them when you're ready, not because a flag exists.
+> - **Doesn't install memory hooks by default even with the flag copied.** They fire on every single Edit/Write once wired — new code, tested (36 cases incl. Windows lockfile concurrency, archive trim boundaries, stale-lock reclaim, architecture-memory recall/staleness, canary-miss open/resolve/escalate/expire-on-prune — see `memory/SPEC.md`), but "tested" and "proven in production" aren't the same claim. Wire them when you're ready, not because a flag exists.
 
 For Cursor/Codex, or if you'd rather not run a script: everything above still applies by hand — point `AGENTS.md`/`.cursor/rules/` at `rules/security-invariants.md`, reference `rules/engineering.md` + `rules/design-lane.md` + `skills/manifest.yaml`, and treat `memory/SPEC.md` as the memory-layer spec.
 

@@ -481,6 +481,37 @@ echo "$OUT" | grep -q "drift canary" || fail "expected drift-canary rollup in Se
 echo "$OUT" | grep -qE "1 open naming-miss" || fail "expected exactly 1 open miss counted, got: $OUT"
 pass "memory-init.js surfaces open canary-miss count at SessionStart"
 
+echo "=== Test 33: canary-check.js -- pruning an idle session with an open pending miss logs EXPIRED ==="
+PRUNE_PROJECT_POSIX="$WORK/prune_project"
+mkdir -p "$PRUNE_PROJECT_POSIX"
+(cd "$PRUNE_PROJECT_POSIX" && git init -q)
+PRUNE_PROJECT=$(win_path "$PRUNE_PROJECT_POSIX")
+mkdir -p "$PRUNE_PROJECT_POSIX/.claude/canary"
+OLD_ISO=$(node -e "console.log(new Date(Date.now() - 31*24*60*60*1000).toISOString())")
+node -e "
+const fs = require('fs');
+const state = {
+  oldWithPending: { offset: 0, lastSeen: '$OLD_ISO', pending: { file: 'rules/engineering.md', at: '$OLD_ISO' } },
+  oldNoPending: { offset: 0, lastSeen: '$OLD_ISO', pending: null }
+};
+fs.writeFileSync('$PRUNE_PROJECT/.claude/canary/state.json', JSON.stringify(state));
+"
+PRUNE_TRANSCRIPT_POSIX="$WORK/prune_transcript.jsonl"
+PRUNE_TRANSCRIPT="$WORK_WIN/prune_transcript.jsonl"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"just some unrelated turn"}]}}' > "$PRUNE_TRANSCRIPT_POSIX"
+run_hook canary-check.js "$PRUNE_PROJECT" '{"cwd":"'"$PRUNE_PROJECT"'","session_id":"currentSession","transcript_path":"'"$PRUNE_TRANSCRIPT"'"}' > /dev/null
+PRUNE_LOG="$PRUNE_PROJECT_POSIX/.claude/canary/log.md"
+grep -q "^EXPIRED .*oldWithPending.*rules/engineering.md" "$PRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$PRUNE_LOG" 2>/dev/null)"
+grep -q "oldNoPending" "$PRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
+PRUNE_STATE="$PRUNE_PROJECT/.claude/canary/state.json"
+node -e "
+const fs = require('fs');
+const state = JSON.parse(fs.readFileSync('$PRUNE_STATE', 'utf8'));
+if ('oldWithPending' in state) { console.error('oldWithPending was not pruned'); process.exit(1); }
+if ('oldNoPending' in state) { console.error('oldNoPending was not pruned'); process.exit(1); }
+"
+pass "idle session with open pending logs EXPIRED before being pruned; idle session with no pending prunes silently"
+
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true

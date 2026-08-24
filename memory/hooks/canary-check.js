@@ -151,12 +151,30 @@ function main() {
 
   // Prune idle sessions so state.json doesn't grow unbounded across months --
   // a known simplification, same "bound it, don't build eviction machinery
-  // until it's a real problem" posture as this file's other size caps.
+  // until it's a real problem" posture as this file's other size caps. A
+  // session pruned with a still-open `pending` miss gets one EXPIRED line
+  // first -- otherwise the audit trail just loses the miss silently instead
+  // of closing it out.
   state[sessionId] = sessState;
   const cutoff = Date.now() - SESSION_TTL_MS;
+  const expiredEvents = [];
   for (const id of Object.keys(state)) {
     const seen = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
-    if (!Number.isNaN(cutoff) && seen < cutoff) delete state[id];
+    if (!Number.isNaN(cutoff) && seen < cutoff) {
+      if (state[id] && state[id].pending) {
+        expiredEvents.push(
+          `EXPIRED | ${lib.nowISO()} | session ${id} | miss on ${state[id].pending.file} never resolved, pruned after 30d idle`
+        );
+      }
+      delete state[id];
+    }
+  }
+  if (expiredEvents.length) {
+    lib.ensureDir(canaryDir);
+    lib.ensureGitignore(canaryDir);
+    lib.withLock(lockPath, () => {
+      fs.appendFileSync(logPath, expiredEvents.join('\n') + '\n');
+    });
   }
   lib.ensureDir(canaryDir);
   lib.ensureGitignore(canaryDir);
