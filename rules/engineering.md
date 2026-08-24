@@ -26,6 +26,10 @@ All of this is advisory prose, not a mechanical gate — no hook blocks a write 
 
 **Mechanism:** `debug-skill` (AlmogBaku) — drives a real debugger via the Debug Adapter Protocol (breakpoints, stepping, live inspection) instead of print-statement debugging. Pair the two: methodology for *how to think about* a bug, mechanism for *how to actually step through* one.
 
+### Environment verification
+
+Before instructing the user to run a CLI command (`pip audit`, `ollama`, `ffmpeg`, etc.), confirm it's already installed or give the install step first — don't assume presence and let the user hit an avoidable error.
+
 ## Code review — pick a default, alternatives documented
 
 Four real, live options (`skills/manifest.yaml`), not mutually exclusive:
@@ -36,6 +40,8 @@ Four real, live options (`skills/manifest.yaml`), not mutually exclusive:
 - **Anthropic first-party** (`code-review` + `pr-review-toolkit`) — zero-third-party-vendor option.
 
 Also from `superpowers`: `requesting-code-review` / `receiving-code-review` skills — dispatch a review subagent with crafted context, and verify feedback technically rather than complying reflexively. Use alongside whichever external reviewer is chosen.
+
+**Call `advisor()` on review/audit-shaped requests** (find bugs, verify a claim, stress-test code against docs/spec) — early, before finalizing findings, not only at the usual pre-done checkpoint. Standing process improvement, not a one-off (confirmed 2026-08-01).
 
 ## Static analysis — beyond raw CI Semgrep
 
@@ -54,6 +60,8 @@ This repo's CI already runs Semgrep end-of-pipeline. `trailofbits/skills` — in
 ## Commit / PR lifecycle
 
 `compound-engineering-plugin` (Every.to) — commit → push → PR (auto-documents new concepts) → babysit CI/review comments until merge → draft release notes. Whole loop, not just message formatting.
+
+**CI/test-infra fixes: reproduce locally before pushing.** For changes touching OS/PATH/binary-resolution or cross-platform shell semantics, reproduce the exact failure locally under a hard timeout and watch it pass before pushing — don't use CI's round-trip as the test oracle. Static review alone doesn't catch this bug class; it reviews code shape, not runtime/environment behavior. Confirmed the hard way: a 2026-08-10/11 claude-harness CI fix took 5 pushes instead of 1-2 until local-repro-under-timeout became the habit.
 
 **What this replaces:** see `WORKFLOW.md`'s "What this replaces" section — not repeated here.
 

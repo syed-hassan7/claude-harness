@@ -31,6 +31,7 @@ This rule targets one-off human-facing deliverables (reports, comparisons, analy
 
 - Read the relevant code before proposing a change. Reuse existing functions/utilities/patterns — see `rules/engineering.md`'s YAGNI ladder.
 - Check `memory/` (see `memory/SPEC.md`) for the live checkpoint — continue from prior context instead of re-exploring from scratch.
+- **Global/scratch scope needs `goal` written by hand too.** `memory-checkpoint.js` never touches `goal`/`next`/`decisions`/`blockers` in either scope (see `memory/SPEC.md`) — the agent edits them directly. Project-scope sessions tend to do this naturally; global scope (no repo to anchor on) is where it gets skipped, leaving the next session's injected checkpoint too thin to answer "what were we doing." Write `goal` explicitly at global scope, not just project scope.
 - For UI-shaped tasks, this is also where `rules/design-lane.md`'s pre-UI exploration step applies.
 
 ## Plan

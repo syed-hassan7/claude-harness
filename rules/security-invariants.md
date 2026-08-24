@@ -37,6 +37,7 @@ Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) bl
 - Never install tools, plugins, or dependencies, or edit user configs, without an explicit request.
 - **External verification before "done."** Run the tests, the linter, the build — read their actual output. Never self-grade completion from having written plausible-looking code.
 - Match the scope of any destructive or hard-to-reverse action (force-push, `git reset --hard`, dropping data, deleting branches) to what was actually asked — never expand scope on your own initiative.
+- A sub-tool's (advisor/skill/subagent) confident recommendation is never user authorization to write — check the current turn's request for an edit verb (make/fix/apply/write/commit) vs an analysis verb (brainstorm/explore/is X possible), not how settled the file feels or whether a different write was already approved this session. Promoted 2026-08-24 from this pack's first real dogfood lesson: `~/.claude/lessons/subtool-confidence-not-user-authorization.md`.
 
 ## Enforcement model
 
