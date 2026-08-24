@@ -119,6 +119,27 @@ function main() {
     injectArchIndex('architecture index', archIndexPath, PROJECT_ARCH_CAP_BYTES);
   }
 
+  // Drift-canary rollup (memory/SPEC.md "Canary-drift memory") -- only
+  // surfaces when there's something open. A "0 misses, all clear" banner
+  // every session is noise that doesn't change what the agent does next;
+  // silence when clean, same context-economy audit rule as everything else
+  // this hook injects.
+  const canaryStatePath = path.join(base, 'canary', 'state.json');
+  if (fs.existsSync(canaryStatePath)) {
+    try {
+      const canaryState = JSON.parse(fs.readFileSync(canaryStatePath, 'utf8'));
+      const openCount = Object.values(canaryState).filter((s) => s && s.pending).length;
+      if (openCount) {
+        const canaryLogPath = path.join(base, 'canary', 'log.md');
+        parts.push(
+          `## Claude Harness — drift canary\n\n${openCount} open naming-miss${openCount === 1 ? '' : 'es'} across recent sessions — see ${canaryLogPath}`
+        );
+      }
+    } catch (_) {
+      /* malformed state file -- skip the rollup, never block SessionStart over it */
+    }
+  }
+
   if (parts.length) {
     const additionalContext = parts.join('\n\n');
     process.stdout.write(

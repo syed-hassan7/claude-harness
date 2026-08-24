@@ -259,6 +259,30 @@ No time-based trim, no rotation code — disk size isn't the real cost here (not
 
 An architecture note may be pointed at from an existing entry in Zarak's global `MEMORY.md` (one extra line naming the note's id/path, using that system's own `[[name]]` cross-reference convention) — **agent-authored only, at note-creation time, through the same write path the agent already uses to edit `MEMORY.md` today.** Never written by `memory-checkpoint.js`, `memory-init.js`, or any other hook in this pack — that hook-mediated path is what carried the real risk (no verified guarantee against Claude Code's own memory management concurrently reading/rewriting that file), and this scopes the cross-link to avoid it entirely rather than skip the feature outright.
 
+## Canary-drift memory (mechanical check on the drift canary itself)
+
+**Status: designed and implemented 2026-08-24**, prompted by a real session where the drift canary (`WORKFLOW.md`'s "name Zarak when actively applying a pack rule") silently failed to fire across many turns that verifiably cited `rules/engineering.md`, `rules/security-invariants.md`, and `WORKFLOW.md` — caught only because the founder noticed, not because anything in the pack did. The canary as originally specified is self-graded prose: the same fallible judgment that might skip applying a rule also grades whether it named itself doing so, so a miss is invisible to the agent that made it.
+
+**What's mechanized, and what isn't.** The canary exists to prove a doc was loaded and reasoned about — that itself is a semantic judgment call no hook can make; mechanizing "did the agent actually follow the rule's substance" would mean rebuilding the phase-gate machinery this pack tore down. What IS mechanizable is the narrow, literal proxy the canary already reduces to: does a response cite a pack file by name, and does it also say "Zarak." A string co-occurrence check, not a semantic one.
+
+**Mechanism (`memory/hooks/canary-check.js`, `UserPromptSubmit`):** reads `transcript_path` (a common field on every hook event, confirmed against Claude Code's own hooks docs 2026-08-24 — not `last_assistant_message`, which is `Stop`-only and, confirmed via search the same day, only the FINAL of potentially several assistant messages a multi-tool-call turn produces; earlier narration in that turn — exactly where this session's real misses landed — is invisible to it). Tracks a byte-offset cursor per `session_id` in `<scope>/canary/state.json`, so each invocation only parses newly-appended transcript lines. Reading from `UserPromptSubmit` rather than `Stop` sidesteps the documented async-write lag on the transcript file: by the time the next prompt fires, real wall-clock time has passed, so the prior turn's lines have almost certainly flushed; any still-unflushed tail is retried on the following prompt via the same cursor.
+
+**Detection logic, per new-lines-since-cursor:**
+- Concatenates every text block from every assistant-typed line in range — cumulative across however many assistant messages the turn actually took (tool-call round-trips split one turn into several).
+- Regex-matches 6 canonical pack identifiers (`rules/engineering.md`, `rules/security-invariants.md`, `rules/design-lane.md`, `WORKFLOW.md`, `skills/manifest.yaml`, `memory/SPEC.md`) — not individual skill names, which would overfire on casual mention.
+- Pack file cited, "Zarak" absent → **OPEN** a miss (append-only log line, `<scope>/canary/log.md`).
+- A miss already open, a later turn's text contains "Zarak" → **RESOLVED** — the naming habit actually resumed, not just that a reminder fired once.
+- A miss already open, a later turn cites a pack file again without the name → **ESCALATED**, with a running count.
+- Deliberately does NOT mark a miss resolved just because the reminder was injected — that would make the log lie (shown as "handled" whether or not naming actually resumed), the same false-green failure mode this file already names for the deferred `verify:` recipe below. Resolution requires the name to actually reappear.
+
+**Surfacing:**
+- Same-session, next turn: if a miss is open, `canary-check.js` injects a short `additionalContext` reminder on the very next `UserPromptSubmit` — not next `SessionStart`. The gap between a miss and the reminder is one turn, not one session.
+- Cross-session: `memory-init.js`'s `SessionStart` rollup shows an open-miss count (sourced from `canary/state.json`, not narrative) with a pointer to `canary/log.md` — only when nonzero. Silent when clean, same context-economy posture as every other injection here.
+
+**State:** `<scope>/canary/state.json` — `{ "<session_id>": { offset, pending: {file, at, escalations} | null, lastSeen } }`. Pruned at every write for entries idle > 30 days — a stated simplification, not eviction machinery built ahead of a real size problem.
+
+**Revisit condition (WATCH, same house style as the SQLite-FTS5 and v2-`verify:` entries above):** the canary was never meant to verify rule *substance*, only the name-drop proxy — and per this session's own record, substantive rule-following was broadly fine even while the naming missed repeatedly. If the miss rate stays high across future sessions while no substantive rule violation ever correlates with a miss, that's evidence the name-drop proxy itself is weak or not worth the noise — narrow or drop the canary rather than reinforce the detector further. A falling miss count alone is proof the proxy is being watched now, not proof the underlying problem is solved.
+
 ## Concurrency
 
 Confirmed directly against Claude Code's own hooks docs: hook invocations for the same event run **in parallel**, and Anthropic's own docs acknowledge the resulting race explicitly (concurrent `PreToolUse` hooks returning `updatedInput` resolve non-deterministically — "last one to finish takes effect"). `PostToolUse` fires on every Edit/Write and could plausibly fire concurrently from parallel subagents touching the same repo. Two file types, two policies — this does not generalize into a broad concurrency framework:

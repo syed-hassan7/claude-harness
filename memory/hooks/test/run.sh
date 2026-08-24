@@ -181,7 +181,7 @@ CP2="$FAKE_HOME/.claude/session/checkpoint.md"
 grep -q "$FAKE_AWS_KEY" "$CP2" && fail "raw secret pattern leaked into checkpoint" || pass "secret pattern redacted"
 
 echo "=== Test 11: malformed / empty stdin never crashes a hook (fail-open) ==="
-for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js; do
+for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js; do
   (cd "$NONGIT_CWD" && echo "" | node "$HOOKS/$script") > "$WORK/hookout" 2>"$WORK/hookerr"
   CODE=$?
   [ "$CODE" -eq 0 ] || fail "$script exited nonzero ($CODE) on empty stdin: $(cat "$WORK/hookerr")"
@@ -437,6 +437,49 @@ echo "=== Test 27: memory-architecture.js -- untracked file -> empty output, no 
 echo "// unrelated" > "$ARCH_PROJECT_POSIX/src/unrelated.ts"
 OUT=$(run_hook memory-architecture.js "$ARCH_PROJECT" '{"cwd":"'"$ARCH_PROJECT"'","tool_name":"Edit","tool_input":{"file_path":"'"$ARCH_PROJECT"'/src/unrelated.ts"}}')
 [ -z "$OUT" ] && pass "untracked file touch produces no output" || fail "expected empty output for untracked file, got: $OUT"
+
+echo ""
+echo "=== Test 28: canary-check.js -- pack-file citation without the name opens a miss + injects a same-turn reminder ==="
+CANARY_PROJECT_POSIX="$WORK/canary_project"
+mkdir -p "$CANARY_PROJECT_POSIX"
+(cd "$CANARY_PROJECT_POSIX" && git init -q)
+CANARY_PROJECT=$(win_path "$CANARY_PROJECT_POSIX")
+WORK_WIN=$(win_path "$WORK")
+TRANSCRIPT_POSIX="$WORK/canary_transcript.jsonl"
+TRANSCRIPT="$WORK_WIN/canary_transcript.jsonl"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Per rules/engineering.md the YAGNI ladder applies here."}]}}' > "$TRANSCRIPT_POSIX"
+OUT=$(run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS1","transcript_path":"'"$TRANSCRIPT"'"}')
+echo "$OUT" | grep -q "drift canary miss" || fail "expected a canary-miss reminder injected, got: $OUT"
+echo "$OUT" | grep -q "rules/engineering.md" || fail "reminder did not name the cited file"
+CANARY_LOG="$CANARY_PROJECT_POSIX/.claude/canary/log.md"
+grep -q "^OPEN .*rules/engineering.md" "$CANARY_LOG" || fail "OPEN entry not logged: $(cat "$CANARY_LOG" 2>/dev/null)"
+pass "canary-check.js opens a miss and injects a same-turn reminder"
+
+echo "=== Test 29: canary-check.js -- name reappearing resolves the pending miss ==="
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Confirming with Zarak now, per WORKFLOW.md drift canary."}]}}' >> "$TRANSCRIPT_POSIX"
+OUT=$(run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS1","transcript_path":"'"$TRANSCRIPT"'"}')
+echo "$OUT" | grep -q "drift canary miss" && fail "expected no reminder once the name reappeared, got: $OUT"
+grep -q "^RESOLVED .*rules/engineering.md" "$CANARY_LOG" || fail "RESOLVED entry not logged: $(cat "$CANARY_LOG")"
+pass "canary-check.js resolves a pending miss only when the name actually reappears, not on mere injection"
+
+echo "=== Test 30: canary-check.js -- repeated citation without the name escalates instead of duplicating OPEN ==="
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Per rules/security-invariants.md Tier 0 applies to this edit."}]}}' >> "$TRANSCRIPT_POSIX"
+run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS1","transcript_path":"'"$TRANSCRIPT"'"}' > /dev/null
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Also rules/design-lane.md step 6 applies."}]}}' >> "$TRANSCRIPT_POSIX"
+run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS1","transcript_path":"'"$TRANSCRIPT"'"}' > /dev/null
+grep -q "^ESCALATED (1)" "$CANARY_LOG" || fail "expected an ESCALATED(1) entry: $(cat "$CANARY_LOG")"
+pass "canary-check.js escalates a still-open miss instead of opening a duplicate"
+
+echo "=== Test 31: canary-check.js -- missing transcript_path -> no crash, empty output ==="
+OUT=$(run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS2","transcript_path":"'"$WORK_WIN"'/does-not-exist.jsonl"}')
+[ -z "$OUT" ] || fail "expected empty output when transcript_path does not exist, got: $OUT"
+pass "canary-check.js handles a missing transcript_path gracefully"
+
+echo "=== Test 32: memory-init.js -- SessionStart rollup surfaces open canary misses ==="
+OUT=$(run_hook memory-init.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS1"}')
+echo "$OUT" | grep -q "drift canary" || fail "expected drift-canary rollup in SessionStart injection: $OUT"
+echo "$OUT" | grep -qE "1 open naming-miss" || fail "expected exactly 1 open miss counted, got: $OUT"
+pass "memory-init.js surfaces open canary-miss count at SessionStart"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="

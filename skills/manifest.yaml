@@ -508,6 +508,29 @@ skills:
       kokonutui/bklit-ui use; confirm its own install path before assuming
       components.json wiring applies.
 
+  - name: transitions-dev
+    role: "Installable agent skill — 27+ production-ready CSS transitions (modals, dropdowns, badges, page transitions) with prefers-reduced-motion baked into every snippet"
+    required: false
+    trigger: "ui + component needs interaction-pattern motion (modal/dropdown/badge/page transitions) — complements react-bits (personality components) and Motion/Anime.js (primitives)"
+    source: "https://github.com/Jakubantalik/transitions-dev"
+    install: "npx skills add Jakubantalik/transitions-dev"
+    stars: 39
+    license: "MIT"
+    vet_date: "2026-08-24"
+    notes: >
+      Zarak-submitted (transitions.dev). Verified via gh api directly: 39
+      stars, MIT, created 2026-04-25, pushed same day as this vet (active), 0
+      open issues, not archived, no pre/postinstall lifecycle scripts in
+      package.json. Genuine installable Claude Code Skill (also works with
+      Cursor/Codex/Copilot/Gemini CLI), not just a copy-paste gallery —
+      packaged via the `npx skills add` installer. Complements rather than
+      duplicates react-bits/Motion/Anime.js: those are components/primitives,
+      this is ready-made interaction-pattern snippets (notification badges,
+      dropdown menus, modal dialogs, page transitions, success/error states)
+      with prefers-reduced-motion accessibility guards built into every one.
+      Young project (~4 months old at vet_date) — re-audit supply-chain
+      signals at next check-in, same caveat as anti-slop's entry above.
+
   - name: agentation
     role: "Visual feedback tool — click a rendered element, annotate it, hand the agent its exact selector/position instead of a prose description"
     required: false

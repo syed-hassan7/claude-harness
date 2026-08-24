@@ -113,7 +113,8 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
 existing arrays — e.g. your SessionStart array already has other hooks,
 append to it, don't replace it):
   "SessionStart":     [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-init.js\"", "timeout": 5 }] }]
-  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-recall.js\"", "timeout": 5 }] }]
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-recall.js\"", "timeout": 5 }] },
+                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/canary-check.js\"", "timeout": 5 }] }]
   "PostToolUse":      [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] },
                         { "matcher": "Read|Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-architecture.js\"", "timeout": 5 }] }]
   "PreCompact":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
@@ -121,9 +122,12 @@ append to it, don't replace it):
 memory-recall.js and memory-architecture.js implement project-architecture
 memory (memory/SPEC.md's "Project-architecture memory" section) -- mechanical
 keyword recall on every prompt + file-touch recall/staleness-flagging on every
-Read/Edit/Write. Note memory-recall.js's UserPromptSubmit registration is a
-SEPARATE array entry from caveman's own UserPromptSubmit hook below -- Claude
-Code runs all matching hooks for an event, this does not replace that one.
+Read/Edit/Write. canary-check.js implements the mechanical drift-canary miss
+detector (memory/SPEC.md's "Canary-drift memory" section) -- checks pack-file
+citation + name co-occurrence on every prompt, non-blocking. Note each of
+these UserPromptSubmit registrations is a SEPARATE array entry from caveman's
+own UserPromptSubmit hook below -- Claude Code runs all matching hooks for an
+event, none of them replace each other.
 Opt-in for a reason — new code, low-volume real-world testing so far. See memory/SPEC.md.
 EOF
 elif [ -d "$PACK_DIR/memory/hooks" ]; then
