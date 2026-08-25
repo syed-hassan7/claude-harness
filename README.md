@@ -5,7 +5,7 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.1.0-3b82f6.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-6.2.0-3b82f6.svg)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#12-using-it-today)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
@@ -71,7 +71,7 @@ No step is mechanically blocked. Skip what doesn't apply, revisit what needs it,
 
 ## 04 What's new
 
-**6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day; the architecture diagram above replaces what used to be a wall of prose. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
+**6.2.0** — a cross-repo memory research pass found lessons had no way to graduate out of their own index, silently degrading with use instead of improving; a watermark-based promotion nudge and a Stage 1 episodic task log close it. **6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## 05 Four things that make this different
 
