@@ -142,16 +142,20 @@ memory/
 ├── SPEC.md                 Automatic dual-scope session checkpoints,
 │                           mistake-memory, project-architecture memory
 │                           (mechanical recall via UserPromptSubmit +
-│                           PostToolUse), and canary-drift memory (mechanical
-│                           check on the drift canary's own name-drop proxy)
+│                           PostToolUse), canary-drift memory (mechanical
+│                           check on the drift canary's own name-drop proxy),
+│                           and review-gate memory (mechanical check on
+│                           skipped pre-commit review-loop/security-audit)
 ├── templates/              checkpoint.md, lesson.md, architecture.md schemas
 └── hooks/                  Working, opt-in hook implementation — see
                              "Using it today" below (install.sh --with-memory-hooks)
-    └── test/run.sh         36-case suite incl. Windows lockfile concurrency,
+    └── test/run.sh         43-case suite incl. Windows lockfile concurrency,
                              archive trim boundaries, stale-lock reclaim,
                              architecture-memory recall/staleness, canary-miss
-                             open/resolve/escalate/expire-on-prune — run
-                             after touching anything under memory/hooks/
+                             open/resolve/escalate/expire-on-prune/per-turn
+                             granularity, and review-gate miss/clean/reminder/
+                             expire-on-prune — run after touching anything
+                             under memory/hooks/
 
 skills/
 ├── manifest.yaml           53 skills, 12 categories, portable contract (new: transitions-dev)
@@ -160,6 +164,18 @@ skills/
 
 caveman/                    Default-on terse communication mode — hooks + skill,
                             see WORKFLOW.md's Communication baseline
+
+onboarding/                 First-run install wizard, 2 surfaces sharing 1 source
+├── steps.json               of truth: question wording (both surfaces) +
+├── verify.js                mechanical post-install check (both surfaces)
+├── skills/onboarding/       in-CLI counterpart to install.sh --onboard
+└── test/run.sh              sandboxed suite — CLAUDE_HARNESS_TARGET + XDG_CONFIG_HOME
+
+visual-plan-local/          Default plan-mode output: structured doc + Artifact,
+├── skills/visual-plan-local/ not a long chat paragraph. Zero MCP/daemon —
+├── references/               see the manifest entry for why, vs. BuilderIO's
+├── template.html              hosted visual-plan
+└── vendor/diagram-design/    vendored MIT diagram engine, see its NOTICE.md
 
 audit-log/
 └── SECURITY_SPEC.md         Spec only, not yet implemented — opt-in PostToolUse
@@ -195,16 +211,22 @@ CLAUDE_HARNESS_ANALYSIS.md  Historical planning doc — analyzes the separate
 ```bash
 ./install.sh                      # rules + skills catalog + memory spec + statusline
 ./install.sh --with-memory-hooks  # ^ plus automatic session checkpoints (opt-in)
+./install.sh --onboard            # interactive wizard for the 2 real choices above, ends with a mechanical verify
+./install.sh --dry-run            # preview every write any of the above would make, write nothing
 ```
 
 Copies `rules/`, `skills/`, `memory/`, and `WORKFLOW.md` into a namespaced `~/.claude/claude-harness/` (never touches `~/.claude/skills/` or `~/.claude/memory/` directly — those are host-owned, live directories), installs the statusline script, and writes a single marked, re-runnable pointer block into `~/.claude/CLAUDE.md` — the one file Claude Code actually auto-loads every session.
+
+`--onboard` is the cold-start, bash-only path — it prompts for memory hooks + caveman intensity, then proves both landed via `onboarding/verify.js` instead of trusting its own stdout. Already mid-session instead? Say **"onboard me to claude-harness"** or `/harness-onboard` — the in-CLI counterpart asks the same 2 questions through `AskUserQuestion`, offers a scratch-directory dry run first, and renders the verify result as a lit-up status page. Both surfaces read `onboarding/steps.json` for their wording, so they never drift apart — see the `onboarding` entry in `skills/manifest.yaml`.
+
+Plan mode's own output is also covered: `visual-plan-local` renders non-trivial plans as a structured document plus a rendered `Artifact` companion (diagrams, real hierarchy, scannable structure) instead of a long chat paragraph — the default for plan mode's "Final Plan" step, not something you have to name. It's a local, zero-MCP counterpart to BuilderIO's `visual-plan`, built after finding that skill's real actions all require a hosted third-party connector with no offline fallback — see the `visual-plan-local` entry in `skills/manifest.yaml` for the full gap analysis and its vendored `diagram-design` (MIT) rendering engine.
 
 > [!IMPORTANT]
 > What it deliberately does **not** do:
 >
 > - **Doesn't touch `settings.json`.** That file holds your existing hooks config — auto-editing structured JSON next to hooks you already depend on is a real corruption risk for no real benefit. If no `statusLine` block is found, the script prints the exact JSON to add by hand (see `statusline/README.md`). The same applies to `--with-memory-hooks`: it copies the hook files and prints the settings.json snippet, but you paste it in yourself.
 > - **Doesn't copy `rules/security-invariants.md` verbatim into `CLAUDE.md`.** If your `CLAUDE.md` already has hand-written security rules, a blind verbatim append duplicates them under different wording — the opposite of this pack's zero-context-bloat pitch. The pointer block links to the canonical file instead; dedupe your existing prose against it yourself, on your own schedule.
-> - **Doesn't install memory hooks by default even with the flag copied.** They fire on every single Edit/Write once wired — new code, tested (36 cases incl. Windows lockfile concurrency, archive trim boundaries, stale-lock reclaim, architecture-memory recall/staleness, canary-miss open/resolve/escalate/expire-on-prune — see `memory/SPEC.md`), but "tested" and "proven in production" aren't the same claim. Wire them when you're ready, not because a flag exists.
+> - **Doesn't install memory hooks by default even with the flag copied.** They fire on every single Edit/Write once wired — new code, tested (43 cases incl. Windows lockfile concurrency, archive trim boundaries, stale-lock reclaim, architecture-memory recall/staleness, canary-miss open/resolve/escalate/expire-on-prune/per-turn granularity, review-gate miss/clean/reminder/expire-on-prune — see `memory/SPEC.md`), but "tested" and "proven in production" aren't the same claim. Wire them when you're ready, not because a flag exists.
 
 For Cursor/Codex, or if you'd rather not run a script: everything above still applies by hand — point `AGENTS.md`/`.cursor/rules/` at `rules/security-invariants.md`, reference `rules/engineering.md` + `rules/design-lane.md` + `skills/manifest.yaml`, and treat `memory/SPEC.md` as the memory-layer spec.
 

@@ -92,6 +92,33 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// Reads only the bytes appended since `sinceOffset`, stopping at the last
+// complete line -- a transcript write mid-flush must never be parsed as a
+// truncated JSON line. Returns the unchanged offset (not `size`) when no
+// complete line is available yet, so the partial tail is retried next time.
+// Shared by canary-check.js and review-gate-check.js -- both scan a
+// transcript incrementally against a per-session byte offset.
+function readTranscriptSince(transcriptPath, sinceOffset) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return { lines: [], newOffset: sinceOffset };
+  const size = fs.statSync(transcriptPath).size;
+  if (size <= sinceOffset) return { lines: [], newOffset: size < sinceOffset ? 0 : sinceOffset };
+  const fd = fs.openSync(transcriptPath, 'r');
+  let chunk;
+  try {
+    const len = size - sinceOffset;
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, sinceOffset);
+    chunk = buf.toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+  const lastNewline = chunk.lastIndexOf('\n');
+  if (lastNewline === -1) return { lines: [], newOffset: sinceOffset };
+  const usable = chunk.slice(0, lastNewline + 1);
+  const newOffset = sinceOffset + Buffer.byteLength(usable, 'utf8');
+  return { lines: usable.split('\n').filter(Boolean), newOffset };
+}
+
 // Bounded synchronous sleep. Avoids Atomics.wait (main-thread portability
 // unverified across Node versions) in favor of a plain busy-wait — wasteful
 // per-millisecond but capped tightly (see acquireLock's maxWaitMs) so total
@@ -308,6 +335,7 @@ module.exports = {
   ensureGitignore,
   stripSecrets,
   nowISO,
+  readTranscriptSince,
   acquireLock,
   releaseLock,
   atomicWrite,

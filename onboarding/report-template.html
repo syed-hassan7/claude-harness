@@ -1,0 +1,111 @@
+<title>claude-harness — install report</title>
+<style>
+  :root {
+    --bg: #FAF8F3; --surface: #F1EDE3; --border: #DDD6C4; --text: #23241F; --muted: #6B6C60;
+    --canary: #8A6A00; --code-bg: #EFEADB;
+    --ok: #2F5233; --ok-soft: #E1EBDD;
+    --pending: #8A6A00; --pending-soft: #F4E4A6;
+    --missing: #8A2E22; --missing-soft: #F3E1DC;
+    --off: #8A8A80; --off-soft: #EDEAE0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161B; --surface: #1B1E24; --border: #2B2F37; --text: #E9E6DA; --muted: #9A9C92;
+      --canary: #E8C547; --code-bg: #1F2229;
+      --ok: #7FBF8A; --ok-soft: #1E2B20;
+      --pending: #E8C547; --pending-soft: #33300F;
+      --missing: #E88A78; --missing-soft: #33201B;
+      --off: #9A9C92; --off-soft: #24262B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161B; --surface: #1B1E24; --border: #2B2F37; --text: #E9E6DA; --muted: #9A9C92;
+    --canary: #E8C547; --code-bg: #1F2229;
+    --ok: #7FBF8A; --ok-soft: #1E2B20; --pending: #E8C547; --pending-soft: #33300F;
+    --missing: #E88A78; --missing-soft: #33201B; --off: #9A9C92; --off-soft: #24262B;
+  }
+  :root[data-theme="light"] {
+    --bg: #FAF8F3; --surface: #F1EDE3; --border: #DDD6C4; --text: #23241F; --muted: #6B6C60;
+    --canary: #8A6A00; --code-bg: #EFEADB;
+    --ok: #2F5233; --ok-soft: #E1EBDD; --pending: #8A6A00; --pending-soft: #F4E4A6;
+    --missing: #8A2E22; --missing-soft: #F3E1DC; --off: #8A8A80; --off-soft: #EDEAE0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; }
+  main { max-width: 680px; margin: 0 auto; padding: 56px 24px 80px; }
+  .eyebrow {
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--canary); margin: 0 0 14px;
+  }
+  h1 { font-size: clamp(24px, 4vw, 32px); line-height: 1.2; margin: 0 0 12px; text-wrap: balance; }
+  .lede { color: var(--muted); font-size: 16px; max-width: 58ch; margin: 0 0 40px; }
+  .cake { display: flex; flex-direction: column; gap: 10px; margin: 0 0 32px; }
+  .tier {
+    border: 1px solid var(--border); border-left: 4px solid var(--state-color);
+    background: var(--surface); border-radius: 3px; padding: 16px 18px;
+    display: grid; grid-template-columns: 28px 130px 1fr; gap: 16px; align-items: baseline;
+    transition: background 200ms ease;
+  }
+  .tier.lit { background: var(--state-soft); }
+  .tier .icon { font-size: 15px; color: var(--state-color); text-align: center; }
+  .tier .label {
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--state-color); font-weight: 600;
+  }
+  .tier .desc { font-size: 14px; color: var(--text); }
+  .tier .desc .detail { display: block; margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+  .tier.status-ok { --state-color: var(--ok); --state-soft: var(--ok-soft); }
+  .tier.status-pending-manual-paste { --state-color: var(--pending); --state-soft: var(--pending-soft); }
+  .tier.status-missing { --state-color: var(--missing); --state-soft: var(--missing-soft); }
+  .tier.status-not-installed { --state-color: var(--off); --state-soft: var(--off-soft); }
+  .next {
+    border: 1px solid var(--border); border-radius: 4px; padding: 18px 20px; background: var(--code-bg);
+    font-size: 14px;
+  }
+  .next h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; margin: 0 0 10px;
+  }
+  .next p { margin: 0 0 8px; }
+  .next p:last-child { margin-bottom: 0; }
+  footer {
+    margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border);
+    font-size: 12.5px; color: var(--muted);
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+  }
+</style>
+<main>
+  <p class="eyebrow">claude-harness · install report</p>
+  <h1>{{HEADLINE}}</h1>
+  <p class="lede">{{SUBHEAD}}</p>
+
+  <div class="cake">
+    <div class="tier status-{{ALWAYS_STATUS}} {{ALWAYS_LIT_CLASS}}">
+      <div class="icon">{{ALWAYS_ICON}}</div>
+      <div class="label">Always-on</div>
+      <div class="desc">Engineering + security rules.<span class="detail">{{ALWAYS_DETAIL}}</span></div>
+    </div>
+    <div class="tier status-{{CAVEMAN_STATUS}} {{CAVEMAN_LIT_CLASS}}">
+      <div class="icon">{{CAVEMAN_ICON}}</div>
+      <div class="label">Caveman</div>
+      <div class="desc">Default communication style.<span class="detail">{{CAVEMAN_DETAIL}}</span></div>
+    </div>
+    <div class="tier status-{{MEMORY_STATUS}} {{MEMORY_LIT_CLASS}}">
+      <div class="icon">{{MEMORY_ICON}}</div>
+      <div class="label">Memory hooks</div>
+      <div class="desc">Session checkpoints + drift-canary.<span class="detail">{{MEMORY_DETAIL}}</span></div>
+    </div>
+  </div>
+
+  <div class="next">
+    <h2>first light</h2>
+    <p>{{FIRST_LIGHT}}</p>
+  </div>
+
+  <footer>generated by onboarding/verify.js — re-run it any time to refresh this report</footer>
+</main>

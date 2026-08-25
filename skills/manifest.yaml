@@ -56,6 +56,54 @@ skills:
       relitigate without re-confirming — this reverses a real ask to make it
       literally unstoppable.
 
+  - name: onboarding
+    role: "Guided first-run install — in-CLI counterpart to install.sh --onboard"
+    required: false
+    trigger: "/harness-onboard, or user asks to onboard/set up/install claude-harness"
+    source: "shipped in this repo — onboarding/steps.json, onboarding/verify.js, onboarding/skills/onboarding/SKILL.md"
+    install: "install.sh always copies onboarding/ into the pack (cheap, read-only files) regardless of flags used. The skill and install.sh's own --onboard flag share one source of truth: steps.json for question wording, verify.js for the mechanical post-install check both surfaces call."
+    notes: >
+      Added 2026-08-24 after a brainstorm pass identified that install.sh's
+      README-then-run path never proves anything landed. Two delivery
+      surfaces on purpose, not one: --onboard is bash-only/interactive
+      (works before any Claude session exists), this skill is agent-driven
+      and non-interactive (AskUserQuestion instead of stdin, so it composes
+      with install.sh's --with-memory-hooks/--caveman-mode flags rather than
+      the blocking --onboard path). Both converge on the same 2 real
+      install.sh choices — no invented "project scope" step; confirmed with
+      the founder that install.sh has exactly 2 real toggles today.
+
+  - name: visual-plan-local
+    role: "Default plan-mode output — structured visual plan document instead of a long chat paragraph"
+    required: false
+    trigger: "entering plan mode for non-trivial/multi-file work; user says \"map this out\", \"design a plan for X\"; /visual-plan-local"
+    source: "shipped in this repo — visual-plan-local/skills/visual-plan-local/SKILL.md, visual-plan-local/references/, visual-plan-local/template.html"
+    install: "install.sh always copies visual-plan-local/ into the pack (cheap, read-only files), same as onboarding/. No settings.json wiring — it's a skill, not a hook."
+    notes: >
+      Added 2026-08-25. Zarak asked to adopt BuilderIO/skills' `visual-plan`
+      skill as the default replacement for plan-mode's long-paragraph output.
+      Investigated live: every real visual-plan action (create/update/read a
+      plan, get feedback) is an MCP call to a hosted third-party server
+      (plan.agent-native.com) — confirmed via `claude mcp list` + tool search
+      that zero such connector exists in this environment, and visual-plan's
+      own SKILL.md explicitly refuses to fall back to inline output if the
+      connector is missing (stops and asks the user to reconnect, rather than
+      degrading gracefully). Adopting it as-is would make "the default for
+      all planning" break the moment that vendor connection isn't live in a
+      given client/session.
+
+      Resolution: kept the genuinely portable half — visual-plan's document
+      discipline (document-quality.md, Plan Discipline, Self-Review-Before-
+      Handoff) — adapted into references/, with every MCP-tool-specific
+      instruction replaced by this pack's own Artifact-tool rendering. Paired
+      it with cathrynlavery/diagram-design (MIT, 39-type self-contained
+      HTML/SVG diagram engine, zero MCP/daemon/account — the missing local
+      rendering half) vendored wholesale at a pinned commit under
+      visual-plan-local/vendor/diagram-design/ (see that dir's NOTICE.md).
+      Both source repos are MIT-licensed; attribution headers are on every
+      adapted file. Named distinctly from upstream's `/visual-plan` to avoid
+      confusion if that skill is ever installed for real later.
+
   - name: rtk
     role: "Terminal noise reduction for noisy CLI output"
     required: false

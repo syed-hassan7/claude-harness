@@ -1,0 +1,201 @@
+<!--
+  visual-plan-local template — read this file for structure + styling before
+  authoring a plan artifact; do not invent a different layout from memory.
+  This is a worked EXAMPLE, not a mail-merge target: copy the section
+  patterns below, fill in real content, and repeat any block marked
+  "repeat per X" as many times as the plan needs (zero, one, or many).
+  Delete a whole section if the plan has nothing for it (e.g. skip Risks for
+  a genuinely low-risk change) — don't emit an empty shell.
+-->
+<title>{{PLAN TITLE}} — plan</title>
+<style>
+  :root {
+    --bg: #FAF8F3; --surface: #F1EDE3; --border: #DDD6C4; --text: #23241F; --muted: #6B6C60;
+    --canary: #8A6A00; --canary-soft: #F4E4A6; --code-bg: #EFEADB;
+    --risk: #8A2E22; --risk-soft: #F3E1DC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161B; --surface: #1B1E24; --border: #2B2F37; --text: #E9E6DA; --muted: #9A9C92;
+      --canary: #E8C547; --canary-soft: #33300F; --code-bg: #1F2229;
+      --risk: #E88A78; --risk-soft: #33201B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161B; --surface: #1B1E24; --border: #2B2F37; --text: #E9E6DA; --muted: #9A9C92;
+    --canary: #E8C547; --canary-soft: #33300F; --code-bg: #1F2229; --risk: #E88A78; --risk-soft: #33201B;
+  }
+  :root[data-theme="light"] {
+    --bg: #FAF8F3; --surface: #F1EDE3; --border: #DDD6C4; --text: #23241F; --muted: #6B6C60;
+    --canary: #8A6A00; --canary-soft: #F4E4A6; --code-bg: #EFEADB; --risk: #8A2E22; --risk-soft: #F3E1DC;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; }
+  main { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; }
+  .eyebrow {
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--canary); margin: 0 0 14px;
+  }
+  h1 { font-size: clamp(26px, 4.5vw, 34px); line-height: 1.2; margin: 0 0 12px; text-wrap: balance; }
+  .lede { color: var(--muted); font-size: 16px; max-width: 62ch; margin: 0 0 8px; }
+  .done-criteria {
+    font-size: 14px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 14px; margin: 16px 0 40px; max-width: 62ch;
+  }
+  .done-criteria b { color: var(--canary); }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    margin: 0 0 18px; display: flex; align-items: center; gap: 10px;
+  }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  section { margin: 0 0 48px; }
+  p { max-width: 68ch; }
+
+  /* Scope & non-goals */
+  .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 620px) { .scope-grid { grid-template-columns: 1fr; } }
+  .scope-col h3 { font-size: 13px; margin: 0 0 8px; }
+  .scope-col ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--text); }
+
+  /* Decisions -- repeat .decision per settled decision */
+  .decision {
+    border: 1px solid var(--border); border-left: 4px solid var(--canary); background: var(--canary-soft);
+    border-radius: 3px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .decision .label {
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--canary); margin-bottom: 4px;
+  }
+  .decision p { margin: 0; font-size: 14.5px; }
+  .decision .rationale { color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+
+  /* Steps -- repeat .step per ordered step */
+  .step { display: grid; grid-template-columns: 40px 1fr; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+  .step:last-child { border-bottom: 1px solid var(--border); }
+  .step .num { font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; font-size: 13px; color: var(--canary); }
+  .step h3 { margin: 0 0 6px; font-size: 15px; }
+  .step p { margin: 0 0 8px; font-size: 14px; }
+  .step .files { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .step .file {
+    font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace;
+    font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 3px;
+    padding: 6px 10px; display: flex; gap: 10px; align-items: baseline;
+  }
+  .step .file .note { font-family: -apple-system, sans-serif; color: var(--muted); font-size: 12.5px; }
+  .step .diagram { margin-top: 12px; border: 1px solid var(--border); border-radius: 4px; padding: 12px; overflow-x: auto; }
+
+  /* Risks -- repeat .risk per risk */
+  .risk { display: flex; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; }
+  .risk:last-child { border-bottom: 1px solid var(--border); }
+  .risk .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--risk); margin-top: 6px; flex-shrink: 0; }
+  .risk .mitigation { color: var(--muted); font-size: 13px; display: block; margin-top: 2px; }
+
+  /* Verification */
+  .verify {
+    border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; background: var(--code-bg); font-size: 14px;
+  }
+  .verify ol { margin: 0; padding-left: 20px; }
+  .verify li { margin-bottom: 6px; }
+  .verify code { font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; font-size: 13px; }
+
+  /* Open questions -- ONE section, repeat .question per open question */
+  .question {
+    border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px; margin-bottom: 10px;
+  }
+  .question .q { font-size: 14.5px; margin: 0 0 8px; font-weight: 600; }
+  .question .options { display: flex; flex-direction: column; gap: 6px; }
+  .question .option { font-size: 13.5px; display: flex; gap: 8px; }
+  .question .option.recommended { color: var(--canary); font-weight: 600; }
+
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); font-family: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Consolas, monospace; }
+</style>
+<main>
+  <p class="eyebrow">{{repo/project name}} · plan</p>
+  <h1>{{Plan title — the outcome, not the mechanism}}</h1>
+  <p class="lede">{{One or two sentences: what this plan does and why, outcome-first.}}</p>
+  <div class="done-criteria"><b>Done when:</b> {{concrete, checkable done-criteria}}</div>
+
+  <section>
+    <h2>scope &amp; non-goals</h2>
+    <div class="scope-grid">
+      <div class="scope-col">
+        <h3>In scope</h3>
+        <ul><li>{{item}}</li></ul>
+      </div>
+      <div class="scope-col">
+        <h3>Explicitly deferred / non-goals</h3>
+        <ul><li>{{item}}</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>decisions</h2>
+    <!-- repeat .decision per settled decision -->
+    <div class="decision">
+      <div class="label">{{short decision label}}</div>
+      <p>{{the decision, stated plainly}}</p>
+      <p class="rationale">{{why — and what alternative was weighed and rejected, if any}}</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>steps</h2>
+    <!-- repeat .step per ordered step, number sequentially -->
+    <div class="step">
+      <div class="num">01</div>
+      <div>
+        <h3>{{step title}}</h3>
+        <p>{{what happens in this step and why}}</p>
+        <div class="files">
+          <div class="file"><span>{{path/to/file.ext}}</span><span class="note">{{one-line note on what changes here}}</span></div>
+        </div>
+        <!-- optional: only when the step involves a genuinely 2D relationship
+             (architecture, dependency, data flow, sequence, state). Build via
+             ../vendor/diagram-design's own visual-type guide + quality bar,
+             embed the resulting inline <svg> directly here. -->
+        <div class="diagram">{{inline SVG from vendor/diagram-design, if this step needs one}}</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>risks</h2>
+    <!-- repeat .risk per risk; omit this whole section if there are none worth naming -->
+    <div class="risk">
+      <div class="dot"></div>
+      <div>{{the risk, one line}}<span class="mitigation">{{mitigation, or why it's accepted}}</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>verification</h2>
+    <div class="verify">
+      <ol>
+        <li>{{command or checkable step}} — <code>{{actual command if known}}</code></li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2>open questions</h2>
+    <!-- ONE section only -- never repeat this heading elsewhere in the document.
+         repeat .question per open question; omit the whole section if every
+         decision was already made above. -->
+    <div class="question">
+      <p class="q">{{the open question}}</p>
+      <div class="options">
+        <div class="option recommended">{{option A}} — recommended: {{why}}</div>
+        <div class="option">{{option B}} — {{why someone might pick this instead}}</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>rendered by visual-plan-local — plan file: {{path to the .md plan-mode wrote}}</footer>
+</main>

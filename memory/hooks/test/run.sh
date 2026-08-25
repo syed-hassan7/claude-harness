@@ -181,7 +181,7 @@ CP2="$FAKE_HOME/.claude/session/checkpoint.md"
 grep -q "$FAKE_AWS_KEY" "$CP2" && fail "raw secret pattern leaked into checkpoint" || pass "secret pattern redacted"
 
 echo "=== Test 11: malformed / empty stdin never crashes a hook (fail-open) ==="
-for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js; do
+for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js review-gate-check.js; do
   (cd "$NONGIT_CWD" && echo "" | node "$HOOKS/$script") > "$WORK/hookout" 2>"$WORK/hookerr"
   CODE=$?
   [ "$CODE" -eq 0 ] || fail "$script exited nonzero ($CODE) on empty stdin: $(cat "$WORK/hookerr")"
@@ -511,6 +511,107 @@ if ('oldWithPending' in state) { console.error('oldWithPending was not pruned');
 if ('oldNoPending' in state) { console.error('oldNoPending was not pruned'); process.exit(1); }
 "
 pass "idle session with open pending logs EXPIRED before being pruned; idle session with no pending prunes silently"
+
+echo ""
+echo "=== Test 34: review-gate-check.js -- a non-commit Bash call is a no-op ==="
+REVGATE_PROJECT_POSIX="$WORK/revgate_project"
+mkdir -p "$REVGATE_PROJECT_POSIX"
+(cd "$REVGATE_PROJECT_POSIX" && git init -q)
+REVGATE_PROJECT=$(win_path "$REVGATE_PROJECT_POSIX")
+REVGATE_TRANSCRIPT_POSIX="$WORK/revgate_transcript.jsonl"
+REVGATE_TRANSCRIPT=$(win_path "$WORK")/revgate_transcript.jsonl
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"just an unrelated turn, no review skill mentioned"}]}}' > "$REVGATE_TRANSCRIPT_POSIX"
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","transcript_path":"'"$REVGATE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"ls -la"}}' > /dev/null
+REVGATE_LOG="$REVGATE_PROJECT_POSIX/.claude/review-gate/log.md"
+[ -f "$REVGATE_LOG" ] && grep -q "session revS1" "$REVGATE_LOG" && fail "non-commit Bash call should not log anything: $(cat "$REVGATE_LOG")"
+REVGATE_STATE="$REVGATE_PROJECT/.claude/review-gate/state.json"
+node -e "
+const s = JSON.parse(require('fs').readFileSync('$REVGATE_STATE', 'utf8'));
+if (s.revS1.reviewSeen) { console.error('reviewSeen should still be false'); process.exit(1); }
+if (s.revS1.pending) { console.error('pending should still be null'); process.exit(1); }
+"
+pass "review-gate-check.js does nothing on a non-commit Bash call"
+
+echo "=== Test 35: review-gate-check.js -- commit with no review evidence logs a MISS ==="
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","transcript_path":"'"$REVGATE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"git commit -m \"add feature\""}}' > /dev/null
+grep -q "^MISS .*session revS1" "$REVGATE_LOG" || fail "expected a MISS entry for revS1: $(cat "$REVGATE_LOG" 2>/dev/null)"
+node -e "
+const s = JSON.parse(require('fs').readFileSync('$REVGATE_STATE', 'utf8'));
+if (!s.revS1.pending) { console.error('pending should be set after an unreviewed commit'); process.exit(1); }
+"
+pass "review-gate-check.js logs a MISS when a commit runs with no review-loop/security-audit evidence"
+
+echo "=== Test 36: review-gate-check.js -- review-marker evidence anywhere in-session clears the sticky flag, no MISS on commit ==="
+REVGATE_TRANSCRIPT2_POSIX="$WORK/revgate_transcript2.jsonl"
+REVGATE_TRANSCRIPT2=$(win_path "$WORK")/revgate_transcript2.jsonl
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running /review-loop before shipping this."}]}}' > "$REVGATE_TRANSCRIPT2_POSIX"
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","transcript_path":"'"$REVGATE_TRANSCRIPT2"'","tool_name":"Bash","tool_input":{"command":"npm test"}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","transcript_path":"'"$REVGATE_TRANSCRIPT2"'","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
+grep -q "session revS2" "$REVGATE_LOG" && fail "revS2 ran review-loop first, should never log a MISS: $(cat "$REVGATE_LOG")"
+pass "review-gate-check.js does not flag a commit once review-loop/security-audit evidence appeared earlier in the session"
+
+echo "=== Test 37: review-gate-check.js -- UserPromptSubmit surfaces a pending miss exactly once ==="
+OUT=$(run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1"}')
+echo "$OUT" | grep -q "review-gate miss" || fail "expected the pending miss to surface on the next turn, got: $OUT"
+OUT2=$(run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1"}')
+[ -z "$OUT2" ] || fail "expected no reminder the second time, pending should already be cleared, got: $OUT2"
+pass "review-gate-check.js surfaces a pending miss once, then clears it"
+
+echo "=== Test 38: review-gate-check.js -- pruning an idle session with an open pending miss logs EXPIRED ==="
+REVPRUNE_PROJECT_POSIX="$WORK/revgate_prune_project"
+mkdir -p "$REVPRUNE_PROJECT_POSIX"
+(cd "$REVPRUNE_PROJECT_POSIX" && git init -q)
+REVPRUNE_PROJECT=$(win_path "$REVPRUNE_PROJECT_POSIX")
+mkdir -p "$REVPRUNE_PROJECT_POSIX/.claude/review-gate"
+REV_OLD_ISO=$(node -e "console.log(new Date(Date.now() - 31*24*60*60*1000).toISOString())")
+node -e "
+const fs = require('fs');
+const state = {
+  oldWithPending: { offset: 0, reviewSeen: false, lastSeen: '$REV_OLD_ISO', pending: { at: '$REV_OLD_ISO' } },
+  oldNoPending: { offset: 0, reviewSeen: true, lastSeen: '$REV_OLD_ISO', pending: null }
+};
+fs.writeFileSync('$REVPRUNE_PROJECT/.claude/review-gate/state.json', JSON.stringify(state));
+"
+REVPRUNE_TRANSCRIPT_POSIX="$WORK/revgate_prune_transcript.jsonl"
+REVPRUNE_TRANSCRIPT=$(win_path "$WORK")/revgate_prune_transcript.jsonl
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"unrelated turn"}]}}' > "$REVPRUNE_TRANSCRIPT_POSIX"
+run_hook review-gate-check.js "$REVPRUNE_PROJECT" '{"cwd":"'"$REVPRUNE_PROJECT"'","session_id":"currentSession","transcript_path":"'"$REVPRUNE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+REVPRUNE_LOG="$REVPRUNE_PROJECT_POSIX/.claude/review-gate/log.md"
+grep -q "^EXPIRED .*oldWithPending" "$REVPRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$REVPRUNE_LOG" 2>/dev/null)"
+grep -q "oldNoPending" "$REVPRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
+REVPRUNE_STATE="$REVPRUNE_PROJECT/.claude/review-gate/state.json"
+node -e "
+const fs = require('fs');
+const state = JSON.parse(fs.readFileSync('$REVPRUNE_STATE', 'utf8'));
+if ('oldWithPending' in state) { console.error('oldWithPending was not pruned'); process.exit(1); }
+if ('oldNoPending' in state) { console.error('oldNoPending was not pruned'); process.exit(1); }
+"
+pass "review-gate-check.js logs EXPIRED for an idle session with an unsurfaced pending miss, prunes silently otherwise"
+
+echo ""
+echo "=== Test 39: canary-check.js -- a name-drop in an earlier turn must not mask a citation in a LATER turn of the same batch ==="
+CANARY2_TRANSCRIPT_POSIX="$WORK/canary2_transcript.jsonl"
+CANARY2_TRANSCRIPT=$(win_path "$WORK")/canary2_transcript.jsonl
+{
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Confirming with Zarak now, all clear."}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"continue"}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Per rules/security-invariants.md Tier 0 applies to this edit."}]}}'
+} > "$CANARY2_TRANSCRIPT_POSIX"
+run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS3","transcript_path":"'"$CANARY2_TRANSCRIPT"'"}' > /dev/null
+grep -q "^OPEN .*session canS3.*rules/security-invariants.md" "$CANARY_LOG" || fail "expected a fresh OPEN for the later turn's unnamed citation, name-drop in the earlier turn should not cover it: $(cat "$CANARY_LOG")"
+pass "canary-check.js evaluates each real turn independently -- an early name-drop no longer masks a later turn's unnamed citation"
+
+echo "=== Test 40: canary-check.js -- non-regression: a tool-call round-trip WITHIN one turn still merges (no real user text in between) ==="
+CANARY3_TRANSCRIPT_POSIX="$WORK/canary3_transcript.jsonl"
+CANARY3_TRANSCRIPT=$(win_path "$WORK")/canary3_transcript.jsonl
+{
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Confirming with Zarak now."}]}}'
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]}}'
+  printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Per rules/design-lane.md step 2, continuing."}]}}'
+} > "$CANARY3_TRANSCRIPT_POSIX"
+run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS4","transcript_path":"'"$CANARY3_TRANSCRIPT"'"}' > /dev/null
+grep -q "session canS4" "$CANARY_LOG" && fail "a tool_result (no real user text) must not split a turn -- name-drop should still cover the later chunk: $(cat "$CANARY_LOG")"
+pass "canary-check.js still merges text split by a tool-call round-trip within one real turn, unchanged from before the fix"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="

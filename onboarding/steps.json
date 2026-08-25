@@ -1,0 +1,45 @@
+{
+  "orient": {
+    "intro": "claude-harness installs in three tiers. Nothing here needs all three — pick opt-ins deliberately.",
+    "tiers": [
+      {
+        "key": "always-on",
+        "label": "Always-on",
+        "description": "Engineering + security rules. No toggle — applies to every session, every project.",
+        "source": "rules/engineering.md, rules/security-invariants.md"
+      },
+      {
+        "key": "triggered",
+        "label": "Triggered",
+        "description": "Skills that wake up when the task shape matches — a UI request, a security review, a PDF.",
+        "source": "skills/manifest.yaml — \"trigger:\", not a rigor dial"
+      },
+      {
+        "key": "opt-in",
+        "label": "Opt-in",
+        "description": "Memory hooks, caveman mode. Fires on every Edit/Write once wired — earns a deliberate yes.",
+        "source": "memory/SPEC.md, caveman/"
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "memoryHooks",
+      "flag": "--with-memory-hooks",
+      "prompt": "Install memory hooks (session checkpoints, project-architecture recall, drift-canary)? They fire on every Edit/Write once wired into settings.json.",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "id": "cavemanMode",
+      "flag": "--caveman-mode",
+      "prompt": "Caveman default intensity — only applied if no caveman config exists yet (never overwrites an existing choice).",
+      "type": "choice",
+      "choices": ["ultra", "full", "lite", "off"],
+      "default": "ultra"
+    }
+  ],
+  "firstLight": {
+    "instructions": "Open a fresh Claude Code session and type anything (e.g. \"hello\"). Look for the CAVEMAN MODE ACTIVE banner in the reply — that's the SessionStart hook actually firing, not just files sitting on disk."
+  }
+}

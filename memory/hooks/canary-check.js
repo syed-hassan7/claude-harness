@@ -40,29 +40,44 @@ const PACK_FILE_RE = new RegExp(PACK_FILES.map((f) => f.replace(/[.*+?^${}()|[\]
 const NAME_RE = /\bzarak\b/i;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune state entries idle > 30 days
 
-// Reads only the bytes appended since `sinceOffset`, stopping at the last
-// complete line -- a transcript write mid-flush must never be parsed as a
-// truncated JSON line. Returns the unchanged offset (not `size`) when no
-// complete line is available yet, so the partial tail is retried next time.
-function readNewLines(transcriptPath, sinceOffset) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return { lines: [], newOffset: sinceOffset };
-  const size = fs.statSync(transcriptPath).size;
-  if (size <= sinceOffset) return { lines: [], newOffset: size < sinceOffset ? 0 : sinceOffset };
-  const fd = fs.openSync(transcriptPath, 'r');
-  let chunk;
+// True turn boundary -- a real user-typed prompt, not a tool_result line fed
+// back mid-turn (those are also `type: "user"` but carry no `text` block).
+// Needed because a hook invocation can span MULTIPLE real turns when no user
+// message arrives in between (e.g. an approved plan running straight through
+// build+verify with no intervening prompt) -- found live: one early name-drop
+// satisfied `hasName` for an entire multi-turn batch, silently masking eight
+// later unnamed citations in the same session. See memory/SPEC.md's
+// "Canary-drift memory" section for the incident this fixed.
+function isRealUserTurnBoundary(line) {
+  let obj;
   try {
-    const len = size - sinceOffset;
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, sinceOffset);
-    chunk = buf.toString('utf8');
-  } finally {
-    fs.closeSync(fd);
+    obj = JSON.parse(line);
+  } catch (_) {
+    return false;
   }
-  const lastNewline = chunk.lastIndexOf('\n');
-  if (lastNewline === -1) return { lines: [], newOffset: sinceOffset };
-  const usable = chunk.slice(0, lastNewline + 1);
-  const newOffset = sinceOffset + Buffer.byteLength(usable, 'utf8');
-  return { lines: usable.split('\n').filter(Boolean), newOffset };
+  if (!obj || obj.type !== 'user') return false;
+  const content = obj.message && obj.message.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0);
+}
+
+// Splits a run of new transcript lines into one group per real turn, dropping
+// the boundary line itself (a user prompt, never assistant text). Within a
+// group, tool-call round-trips still concatenate as before -- only a REAL
+// user message starts a new group.
+function partitionIntoTurns(lines) {
+  const turns = [];
+  let current = [];
+  for (const line of lines) {
+    if (isRealUserTurnBoundary(line)) {
+      if (current.length) turns.push(current);
+      current = [];
+      continue;
+    }
+    current.push(line);
+  }
+  if (current.length) turns.push(current);
+  return turns;
 }
 
 // Concatenates every text block from every assistant-typed transcript line in
@@ -112,32 +127,38 @@ function main() {
   const state = readJSON(statePath, {});
   const sessState = state[sessionId] || { offset: 0, pending: null };
 
-  const { lines, newOffset } = readNewLines(transcriptPath, sessState.offset);
+  const { lines, newOffset } = lib.readTranscriptSince(transcriptPath, sessState.offset);
   sessState.offset = newOffset;
   sessState.lastSeen = lib.nowISO();
 
   if (lines.length) {
-    const text = extractAssistantText(lines);
-    const citesPack = PACK_FILE_RE.test(text);
-    const hasName = NAME_RE.test(text);
     const events = [];
+    // One evaluation per real turn, not one over the whole batch -- a
+    // name-drop in an earlier turn must not mask a citation in a later one
+    // just because both landed in the same hook invocation.
+    for (const turnLines of partitionIntoTurns(lines)) {
+      const text = extractAssistantText(turnLines);
+      if (!text) continue;
+      const citesPack = PACK_FILE_RE.test(text);
+      const hasName = NAME_RE.test(text);
 
-    if (sessState.pending) {
-      if (hasName) {
-        events.push(`RESOLVED | ${lib.nowISO()} | session ${sessionId} | prior miss on ${sessState.pending.file} -- name reappeared`);
-        sessState.pending = null;
-      } else if (citesPack) {
-        sessState.pending.escalations = (sessState.pending.escalations || 0) + 1;
-        events.push(
-          `ESCALATED (${sessState.pending.escalations}) | ${lib.nowISO()} | session ${sessionId} | still missing since citing ${sessState.pending.file}`
-        );
+      if (sessState.pending) {
+        if (hasName) {
+          events.push(`RESOLVED | ${lib.nowISO()} | session ${sessionId} | prior miss on ${sessState.pending.file} -- name reappeared`);
+          sessState.pending = null;
+        } else if (citesPack) {
+          sessState.pending.escalations = (sessState.pending.escalations || 0) + 1;
+          events.push(
+            `ESCALATED (${sessState.pending.escalations}) | ${lib.nowISO()} | session ${sessionId} | still missing since citing ${sessState.pending.file}`
+          );
+        }
       }
-    }
-    if (!sessState.pending && citesPack && !hasName) {
-      const matchedFile = PACK_FILES.find((f) => text.toLowerCase().includes(f.toLowerCase())) || 'a pack file';
-      const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 140);
-      sessState.pending = { file: matchedFile, at: lib.nowISO() };
-      events.push(`OPEN | ${lib.nowISO()} | session ${sessionId} | cited ${matchedFile}, no name -- "${excerpt}"`);
+      if (!sessState.pending && citesPack && !hasName) {
+        const matchedFile = PACK_FILES.find((f) => text.toLowerCase().includes(f.toLowerCase())) || 'a pack file';
+        const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 140);
+        sessState.pending = { file: matchedFile, at: lib.nowISO() };
+        events.push(`OPEN | ${lib.nowISO()} | session ${sessionId} | cited ${matchedFile}, no name -- "${excerpt}"`);
+      }
     }
 
     if (events.length) {

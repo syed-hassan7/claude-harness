@@ -40,6 +40,7 @@ This rule targets one-off human-facing deliverables (reports, comparisons, analy
 
 - For non-trivial or multi-file changes, state the approach before writing code. Ask only when a decision genuinely can't be made from context — don't interrupt for things you can reasonably infer. `grill-me` (see `rules/engineering.md` "Planning") is the lightweight tool for this — a short pre-implementation interview to surface disagreement before code gets written.
 - Large features only: `to-spec` → `to-tickets` (see `rules/engineering.md` "Planning") is the default lighter pipeline; `spec-kit` (see `skills/manifest.yaml`, `trigger: large-feature`) remains WATCH — cherry-pick its templates only, don't wire its full gate-driven workflow. Most tasks skip all of this entirely; it is not mandatory infrastructure.
+- When plan mode reaches its "Final Plan" step for non-trivial work, `visual-plan-local` (see `skills/manifest.yaml`) is the default rendering surface — a structured document held to a real quality bar plus a rendered `Artifact` companion, not a long chat paragraph. This is the default because the plan file itself is what it produces; it doesn't need to be separately invoked.
 
 ## Build
 
@@ -58,6 +59,7 @@ This rule targets one-off human-facing deliverables (reports, comparisons, analy
 - `rules/security-invariants.md` applies unconditionally, every turn, regardless of task shape — it is not a step you reach, it is always active.
 - For security-relevant surfaces (auth, API endpoints, data handling), writing a spec via `/security-spec` before implementing is still good practice — advisory now, not phase-gate-blocked.
 - Pre-merge: run `/security-review` (read-only audit) on security-relevant changes before they ship.
+- **Mechanically checked, not just stated.** Same self-graded-prose problem as the drift canary above: a real session shipped a commit with neither `/review-loop` nor `security-audit` invoked despite both being trigger-matched, and nothing noticed (`memory/project_skill_adoption_gap_evidence.md`). `memory/hooks/review-gate-check.js` (opt-in, same `--with-memory-hooks` flag) now watches every commit for review-loop/security-audit evidence anywhere earlier in the session and logs a non-blocking miss on the next turn if none is found — see `memory/SPEC.md`'s "Review-gate memory" section.
 
 ## What this replaces
 
