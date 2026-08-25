@@ -181,7 +181,7 @@ CP2="$FAKE_HOME/.claude/session/checkpoint.md"
 grep -q "$FAKE_AWS_KEY" "$CP2" && fail "raw secret pattern leaked into checkpoint" || pass "secret pattern redacted"
 
 echo "=== Test 11: malformed / empty stdin never crashes a hook (fail-open) ==="
-for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js review-gate-check.js; do
+for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js review-gate-check.js design-lane-gate-check.js; do
   (cd "$NONGIT_CWD" && echo "" | node "$HOOKS/$script") > "$WORK/hookout" 2>"$WORK/hookerr"
   CODE=$?
   [ "$CODE" -eq 0 ] || fail "$script exited nonzero ($CODE) on empty stdin: $(cat "$WORK/hookerr")"
@@ -612,6 +612,88 @@ CANARY3_TRANSCRIPT=$(win_path "$WORK")/canary3_transcript.jsonl
 run_hook canary-check.js "$CANARY_PROJECT" '{"cwd":"'"$CANARY_PROJECT"'","session_id":"canS4","transcript_path":"'"$CANARY3_TRANSCRIPT"'"}' > /dev/null
 grep -q "session canS4" "$CANARY_LOG" && fail "a tool_result (no real user text) must not split a turn -- name-drop should still cover the later chunk: $(cat "$CANARY_LOG")"
 pass "canary-check.js still merges text split by a tool-call round-trip within one real turn, unchanged from before the fix"
+
+echo ""
+echo "=== Test 41: design-lane-gate-check.js -- a non-UI edit + commit is a no-op ==="
+DLG_PROJECT_POSIX="$WORK/dlg_project"
+mkdir -p "$DLG_PROJECT_POSIX"
+(cd "$DLG_PROJECT_POSIX" && git init -q)
+DLG_PROJECT=$(win_path "$DLG_PROJECT_POSIX")
+DLG_LOG="$DLG_PROJECT_POSIX/.claude/design-lane-gate/log.md"
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS1","tool_name":"Edit","tool_input":{"file_path":"scripts/build.py"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS1","tool_name":"Bash","tool_input":{"command":"git commit -m \"backend fix\""}}' > /dev/null
+[ -f "$DLG_LOG" ] && grep -q "session dlgS1" "$DLG_LOG" && fail "non-UI edit should never trigger a MISS: $(cat "$DLG_LOG")"
+pass "design-lane-gate-check.js ignores a non-UI file edit entirely"
+
+echo "=== Test 42: design-lane-gate-check.js -- UI edit + commit with no screenshot evidence logs a MISS ==="
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS2","tool_name":"Edit","tool_input":{"file_path":"src/components/Card.tsx"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS2","tool_name":"Bash","tool_input":{"command":"git commit -m \"new card component\""}}' > /dev/null
+grep -q "^MISS .*session dlgS2" "$DLG_LOG" || fail "expected a MISS entry for dlgS2: $(cat "$DLG_LOG" 2>/dev/null)"
+pass "design-lane-gate-check.js logs a MISS when a commit ships a touched UI file with no screenshot evidence"
+
+echo "=== Test 43: design-lane-gate-check.js -- an image Read counts as screenshot evidence, no MISS on commit ==="
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS3","tool_name":"Edit","tool_input":{"file_path":"src/components/Modal.tsx"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS3","tool_name":"Read","tool_input":{"file_path":"'"$WORK_WIN"'/modal-screenshot.png"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS3","tool_name":"Bash","tool_input":{"command":"git commit -m \"modal styling\""}}' > /dev/null
+grep -q "session dlgS3" "$DLG_LOG" && fail "reading back a screenshot should count as evidence, no MISS expected: $(cat "$DLG_LOG")"
+pass "design-lane-gate-check.js treats an image-file Read as screenshot evidence"
+
+echo "=== Test 44: design-lane-gate-check.js -- a Bash command mentioning playwright also counts as evidence ==="
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS4","tool_name":"Edit","tool_input":{"file_path":"src/App.css"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS4","tool_name":"Bash","tool_input":{"command":"npx playwright test --project=chromium"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS4","tool_name":"Bash","tool_input":{"command":"git commit -m \"css tweak\""}}' > /dev/null
+grep -q "session dlgS4" "$DLG_LOG" && fail "a playwright Bash invocation should count as evidence, no MISS expected: $(cat "$DLG_LOG")"
+pass "design-lane-gate-check.js treats a playwright-mentioning Bash command as screenshot evidence"
+
+echo "=== Test 45: design-lane-gate-check.js -- UserPromptSubmit surfaces a pending miss exactly once ==="
+OUT=$(run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS2"}')
+echo "$OUT" | grep -q "design-lane gate miss" || fail "expected the pending miss to surface on the next turn, got: $OUT"
+OUT2=$(run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS2"}')
+[ -z "$OUT2" ] || fail "expected no reminder the second time, pending should already be cleared, got: $OUT2"
+pass "design-lane-gate-check.js surfaces a pending miss once, then clears it"
+
+echo "=== Test 46: design-lane-gate-check.js -- pruning an idle session with an open pending miss logs EXPIRED ==="
+DLGPRUNE_PROJECT_POSIX="$WORK/dlg_prune_project"
+mkdir -p "$DLGPRUNE_PROJECT_POSIX"
+(cd "$DLGPRUNE_PROJECT_POSIX" && git init -q)
+DLGPRUNE_PROJECT=$(win_path "$DLGPRUNE_PROJECT_POSIX")
+mkdir -p "$DLGPRUNE_PROJECT_POSIX/.claude/design-lane-gate"
+DLG_OLD_ISO=$(node -e "console.log(new Date(Date.now() - 31*24*60*60*1000).toISOString())")
+node -e "
+const fs = require('fs');
+const state = {
+  oldWithPending: { uiTouched: true, screenshotSeen: false, lastSeen: '$DLG_OLD_ISO', pending: { at: '$DLG_OLD_ISO' } },
+  oldNoPending: { uiTouched: true, screenshotSeen: true, lastSeen: '$DLG_OLD_ISO', pending: null }
+};
+fs.writeFileSync('$DLGPRUNE_PROJECT/.claude/design-lane-gate/state.json', JSON.stringify(state));
+"
+run_hook design-lane-gate-check.js "$DLGPRUNE_PROJECT" '{"cwd":"'"$DLGPRUNE_PROJECT"'","session_id":"currentSession","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+DLGPRUNE_LOG="$DLGPRUNE_PROJECT_POSIX/.claude/design-lane-gate/log.md"
+grep -q "^EXPIRED .*oldWithPending" "$DLGPRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$DLGPRUNE_LOG" 2>/dev/null)"
+grep -q "oldNoPending" "$DLGPRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
+DLGPRUNE_STATE="$DLGPRUNE_PROJECT/.claude/design-lane-gate/state.json"
+node -e "
+const fs = require('fs');
+const state = JSON.parse(fs.readFileSync('$DLGPRUNE_STATE', 'utf8'));
+if ('oldWithPending' in state) { console.error('oldWithPending was not pruned'); process.exit(1); }
+if ('oldNoPending' in state) { console.error('oldNoPending was not pruned'); process.exit(1); }
+"
+pass "design-lane-gate-check.js logs EXPIRED for an idle session with an unsurfaced pending miss, prunes silently otherwise"
+
+echo "=== Test 47: design-lane-gate-check.js -- a chained command citing playwright AFTER the commit must not suppress the MISS ==="
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS5","tool_name":"Edit","tool_input":{"file_path":"src/components/Panel.tsx"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG_PROJECT" '{"cwd":"'"$DLG_PROJECT"'","session_id":"dlgS5","tool_name":"Bash","tool_input":{"command":"git commit -m \"panel\" && npx playwright test"}}' > /dev/null
+grep -q "^MISS .*session dlgS5" "$DLG_LOG" || fail "expected a MISS -- playwright mentioned AFTER the commit in the same chained command must not count as prior evidence: $(cat "$DLG_LOG" 2>/dev/null)"
+pass "design-lane-gate-check.js only counts screenshot evidence that existed before the commit, not evidence the same chained command manufactures after it"
+
+echo "=== Test 48: design-lane-gate-check.js -- an irrelevant tool call touches no state at all (early-return) ==="
+DLG_IRRELEVANT_PROJECT_POSIX="$WORK/dlg_irrelevant_project"
+mkdir -p "$DLG_IRRELEVANT_PROJECT_POSIX"
+(cd "$DLG_IRRELEVANT_PROJECT_POSIX" && git init -q)
+DLG_IRRELEVANT_PROJECT=$(win_path "$DLG_IRRELEVANT_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG_IRRELEVANT_PROJECT" '{"cwd":"'"$DLG_IRRELEVANT_PROJECT"'","session_id":"dlgS6","tool_name":"Read","tool_input":{"file_path":"README.md"}}' > /dev/null
+[ -d "$DLG_IRRELEVANT_PROJECT_POSIX/.claude/design-lane-gate" ] && fail "a Read on a non-image file should never create the state dir at all: $(ls "$DLG_IRRELEVANT_PROJECT_POSIX/.claude/design-lane-gate" 2>/dev/null)"
+pass "design-lane-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="

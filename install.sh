@@ -192,10 +192,12 @@ append to it, don't replace it):
   "SessionStart":     [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-init.js\"", "timeout": 5 }] }]
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-recall.js\"", "timeout": 5 }] },
                         { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/canary-check.js\"", "timeout": 5 }] },
-                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] }]
+                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
+                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] }]
   "PostToolUse":      [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] },
                         { "matcher": "Read|Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-architecture.js\"", "timeout": 5 }] },
-                        { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] }]
+                        { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
+                        { "matcher": "Edit|Write|Read|Bash|mcp__playwright.*", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] }]
   "PreCompact":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
   "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-flush.js\"", "timeout": 5 }] }]
 memory-recall.js and memory-architecture.js implement project-architecture
@@ -206,8 +208,13 @@ detector (memory/SPEC.md's "Canary-drift memory" section) -- checks pack-file
 citation + name co-occurrence on every prompt, non-blocking. review-gate-check.js
 implements the mechanical review-gate (memory/SPEC.md's "Review-gate memory"
 section) -- registered TWICE (PostToolUse:Bash to detect a commit, UserPromptSubmit
-to surface a miss on the next turn), same file for both, non-blocking. Note each of
-these UserPromptSubmit registrations is a SEPARATE array entry from caveman's
+to surface a miss on the next turn), same file for both, non-blocking.
+design-lane-gate-check.js implements the mechanical design-lane gate
+(memory/SPEC.md's "Design-lane gate memory" section) -- same two-registration
+shape, but detection is fully structural (Edit/Write on a UI file, Read on an
+image file, mcp__playwright.* tool calls) rather than a transcript text scan,
+non-blocking. Note each of these UserPromptSubmit registrations is a SEPARATE
+array entry from caveman's
 own UserPromptSubmit hook below -- Claude Code runs all matching hooks for an
 event, none of them replace each other.
 Opt-in for a reason — new code, low-volume real-world testing so far. See memory/SPEC.md.

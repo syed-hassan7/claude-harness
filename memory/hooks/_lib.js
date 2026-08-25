@@ -92,6 +92,19 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// "git" and "commit" in the same clause, unbroken by a chain separator
+// (&, |, ;) -- so `git status && docker commit foo` does not false-match.
+// Text pattern, not a tool_response exit-code check: reading tool_response
+// would cross a line audit-log/SECURITY_SPEC.md already draws deliberately
+// for hook design (never consult tool_response). Best-effort classification,
+// not reliable capture -- same class of limitation SECURITY_SPEC.md already
+// accepts for its own Bash coverage. Shared by review-gate-check.js and
+// design-lane-gate-check.js -- both treat a commit as their crisp trigger.
+const GIT_COMMIT_RE = /\bgit\b[^&|;\n]*\bcommit\b/i;
+function isGitCommitCommand(command) {
+  return GIT_COMMIT_RE.test(command || '');
+}
+
 // Reads only the bytes appended since `sinceOffset`, stopping at the last
 // complete line -- a transcript write mid-flush must never be parsed as a
 // truncated JSON line. Returns the unchanged offset (not `size`) when no
@@ -336,6 +349,7 @@ module.exports = {
   stripSecrets,
   nowISO,
   readTranscriptSince,
+  isGitCommitCommand,
   acquireLock,
   releaseLock,
   atomicWrite,

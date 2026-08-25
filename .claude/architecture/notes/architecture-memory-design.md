@@ -21,7 +21,7 @@ Project-architecture recall is mechanical (3 hook layers: SessionStart ambient i
 Note-content authoring stays agent-judgment (gated, same posture as lessons) — only recall and staleness-flagging are hook-mechanical. See memory/SPEC.md's "Project-architecture memory" section for the full design and the correction note explaining why the original synthesis got this wrong.
 
 ## Verified against
-memory/hooks/memory-recall.js, memory/hooks/memory-architecture.js, memory/SPEC.md's "Recall (read trigger) — three layers, implemented" section, re-confirmed 2026-08-25. This flag's trigger was an addendum to the existing "Canary-drift memory" section (documenting a per-turn-granularity fix to canary-check.js) — not a change to the 3-layer Project-architecture-memory design this note describes.
+memory/hooks/memory-recall.js, memory/hooks/memory-architecture.js, memory/SPEC.md's "Recall (read trigger) — three layers, implemented" section, re-confirmed 2026-08-25. This flag's trigger was a new "Design-lane gate memory" section added to SPEC.md — a third sibling store (its own hook, own state, own UserPromptSubmit surfacing), not a change to the 3-layer Project-architecture-memory design this note describes.
 
 ## Staleness check
 

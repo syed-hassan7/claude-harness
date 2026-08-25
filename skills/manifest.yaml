@@ -11,7 +11,7 @@
 #
 # Drift canary applies to this file — see WORKFLOW.md's "Drift canary" note.
 
-version: "6.0.0"
+version: "6.1.0"
 
 skills:
   # ── Engineering (always on) ────────────────────────────────────────────
@@ -847,6 +847,22 @@ known_issues:
       mismatch -> inject then archive+delete), covered by
       `memory/hooks/test/run.sh` tests 4-5 (23/23 passing as of 2026-08-18
       health-check re-verification). See memory/SPEC.md for the design.
+  - entry: "Skill tool dispatch (Claude Code platform constraint, not a bug in this pack)"
+    issue: >
+      Confirmed live 2026-08-25 with visual-plan-local: a newly-added or
+      newly-vendored skill cannot be dispatched by name via the Skill tool
+      mid-session — "Unknown skill: <name>" — until a fresh session reloads
+      the skill index. Not fixable from within this pack; it's a Claude Code
+      session-lifecycle constraint, no amount of manifest.yaml or SKILL.md
+      correctness changes it. Route around it, don't chase it: after adding
+      a new skill, either start a fresh session before relying on by-name
+      dispatch, or manually follow the skill's own written steps in the
+      interim — only the Skill tool's by-name lookup is affected, the
+      skill's instructions themselves work fine either way. Surfaced during
+      the same audit that produced review-gate-check.js and
+      design-lane-gate-check.js — a second concrete "the mechanism doesn't
+      actually fire" data point, distinct from those two (this one is the
+      tool refusing to dispatch at all, not the agent skipping a step).
 
 # Confirmed real, actively reviewed, and rejected — kept here so a future
 # pass doesn't re-litigate these without cause. See skills/RESEARCH.md §6

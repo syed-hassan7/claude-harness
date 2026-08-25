@@ -32,7 +32,6 @@ const fs = require('fs');
 const path = require('path');
 const lib = require('./_lib');
 
-const COMMIT_RE = /\bgit\b[^&|;\n]*\bcommit\b/i;
 const MARKER_RE = /\b(review-loop|security-audit|security-review|security-spec|red-team-desk|coderabbit)\b/i;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune state entries idle > 30 days
 
@@ -90,7 +89,7 @@ function handlePostToolUse(input, sessState, transcriptPath, sessionId, dir, log
   }
 
   const command = (input.tool_input && input.tool_input.command) || '';
-  if (COMMIT_RE.test(command) && !sessState.reviewSeen) {
+  if (lib.isGitCommitCommand(command) && !sessState.reviewSeen) {
     sessState.pending = { at: lib.nowISO() };
     appendLog(dir, logPath, lockPath, [
       `MISS | ${lib.nowISO()} | session ${sessionId} | commit ran, no review-loop/security-audit evidence yet this session`,
