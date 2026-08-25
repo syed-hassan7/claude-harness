@@ -75,6 +75,7 @@ function main() {
 
   if (fs.existsSync(lessonsIndexPath)) {
     let idx = fs.readFileSync(lessonsIndexPath, 'utf8');
+    const lessonsNonEmpty = idx.trim().length > 0;
     if (Buffer.byteLength(idx, 'utf8') > LESSONS_INDEX_CAP_BYTES) {
       const kept = idx.slice(0, LESSONS_INDEX_CAP_BYTES);
       const droppedLines = idx
@@ -87,6 +88,52 @@ function main() {
       idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${lessonsIndexPath}`;
     }
     parts.push('## Claude Harness — lessons index\n\n' + idx.trim());
+
+    // Lesson-promotion review nudge (memory/SPEC.md "Lesson-promotion memory").
+    // Folded into this block, not a new hook file -- it reuses the read/
+    // existence check just above rather than a second SessionStart
+    // registration and a second settings.json wiring entry. Read-only: this
+    // never writes promotion/state.json -- see WORKFLOW.md's promotion
+    // ritual for the agent-authored write side.
+    if (lessonsNonEmpty) {
+      try {
+        const promotionStatePath = path.join(base, 'promotion', 'state.json');
+        let lastReviewedAt = null;
+        if (fs.existsSync(promotionStatePath)) {
+          try {
+            const state = JSON.parse(fs.readFileSync(promotionStatePath, 'utf8'));
+            lastReviewedAt = state && typeof state.lastReviewedAt === 'string' ? state.lastReviewedAt : null;
+          } catch (_) {
+            /* malformed state file -- treat as never-reviewed (fail toward
+               nudging, not toward silence), never block SessionStart over it */
+          }
+        }
+        // NaN-safe by construction: Date.parse of a missing/malformed watermark
+        // is NaN, and `indexMtimeMs > NaN` is false in JS -- which would read a
+        // corrupt watermark as "already reviewed," the wrong failure direction
+        // for a nudge whose only cost is one skippable line. Explicit
+        // Number.isFinite check instead of trusting the comparison's own NaN behavior.
+        const lastReviewedMs = lastReviewedAt ? Date.parse(lastReviewedAt) : NaN;
+        const indexMtimeMs = fs.statSync(lessonsIndexPath).mtimeMs;
+        const needsReview = !Number.isFinite(lastReviewedMs) || indexMtimeMs > lastReviewedMs;
+        if (needsReview) {
+          const msg =
+            'Lessons changed since the last promotion-review pass. Classify each lesson ' +
+            '(or cluster): short cross-cutting rule -> rules/*.md; multi-step behavior -> ' +
+            'skills/manifest.yaml; structural fact, not a correction -> an architecture-note ' +
+            "instead; coincidental/not-yet-durable -> leave as-is. See WORKFLOW.md's promotion " +
+            'ritual and memory/SPEC.md\'s "Lesson-promotion memory" section.';
+          parts.push('## Claude Harness — lesson promotion review\n\n' + msg);
+        }
+      } catch (_) {
+        // A transient stat/read failure here (e.g. the index file vanishing
+        // between the readFileSync above and this statSync -- external
+        // delete, AV scan, a sync-engine lock) must never abort main(): the
+        // checkpoint/archive-index/lessons-index text already queued into
+        // `parts` would be lost too, not just this nudge. Fail toward
+        // skipping the nudge, never toward losing everything already built.
+      }
+    }
   }
 
   // Project-architecture memory: ambient index injection, see memory/SPEC.md's

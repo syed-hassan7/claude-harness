@@ -695,6 +695,86 @@ run_hook design-lane-gate-check.js "$DLG_IRRELEVANT_PROJECT" '{"cwd":"'"$DLG_IRR
 [ -d "$DLG_IRRELEVANT_PROJECT_POSIX/.claude/design-lane-gate" ] && fail "a Read on a non-image file should never create the state dir at all: $(ls "$DLG_IRRELEVANT_PROJECT_POSIX/.claude/design-lane-gate" 2>/dev/null)"
 pass "design-lane-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
+echo "=== Test 49: lesson-promotion nudge -- lessons exist, no watermark yet -> nudge fires ==="
+PROMO49_HOME_POSIX="$WORK/promo49_home"
+mkdir -p "$PROMO49_HOME_POSIX/.claude/lessons"
+PROMO49_HOME=$(win_path "$PROMO49_HOME_POSIX")
+PROMO49_CWD_POSIX="$WORK/promo49_cwd"
+mkdir -p "$PROMO49_CWD_POSIX"
+PROMO49_CWD=$(win_path "$PROMO49_CWD_POSIX")
+echo "- some-lesson: a generalizable rule (lessons/some-lesson.md)" > "$PROMO49_HOME_POSIX/.claude/lessons/index.md"
+PROMO49_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO49_HOME" run_hook memory-init.js "$PROMO49_CWD" "{\"cwd\":\"$PROMO49_CWD\",\"session_id\":\"promo49\"}")
+echo "$PROMO49_OUT" | grep -q "lesson promotion review" || fail "expected a lesson-promotion nudge with no prior watermark, got: $PROMO49_OUT"
+pass "lesson-promotion nudge fires when lessons exist and no watermark has ever been written"
+[ -d "$PROMO49_HOME_POSIX/.claude/promotion" ] && fail "the promotion nudge is read-only -- it must never create .claude/promotion as a side effect of a pure read"
+pass "lesson-promotion nudge creates no promotion/ directory as a side effect (matches Test 1's read-only invariant for session/)"
+
+echo "=== Test 50: lesson-promotion nudge -- watermark newer than index mtime -> silent ==="
+PROMO50_HOME_POSIX="$WORK/promo50_home"
+mkdir -p "$PROMO50_HOME_POSIX/.claude/lessons" "$PROMO50_HOME_POSIX/.claude/promotion"
+PROMO50_HOME=$(win_path "$PROMO50_HOME_POSIX")
+PROMO50_CWD_POSIX="$WORK/promo50_cwd"
+mkdir -p "$PROMO50_CWD_POSIX"
+PROMO50_CWD=$(win_path "$PROMO50_CWD_POSIX")
+echo "- some-lesson: a generalizable rule (lessons/some-lesson.md)" > "$PROMO50_HOME_POSIX/.claude/lessons/index.md"
+touch_seconds_ago 3600 "$PROMO50_HOME_POSIX/.claude/lessons/index.md"
+PROMO50_NOW_ISO=$(node -e "console.log(new Date().toISOString())")
+node -e "require('fs').writeFileSync('$PROMO50_HOME/.claude/promotion/state.json', JSON.stringify({lastReviewedAt: '$PROMO50_NOW_ISO'}))"
+PROMO50_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO50_HOME" run_hook memory-init.js "$PROMO50_CWD" "{\"cwd\":\"$PROMO50_CWD\",\"session_id\":\"promo50\"}")
+echo "$PROMO50_OUT" | grep -q "lesson promotion review" && fail "expected no nudge -- watermark is newer than the index, got: $PROMO50_OUT"
+pass "lesson-promotion nudge stays silent once the watermark is current"
+
+echo "=== Test 51: lesson-promotion nudge -- no lessons index at all -> silent, no crash ==="
+PROMO51_CWD_POSIX="$WORK/promo51_cwd"
+mkdir -p "$PROMO51_CWD_POSIX"
+PROMO51_CWD=$(win_path "$PROMO51_CWD_POSIX")
+PROMO51_HOME_POSIX="$WORK/promo51_home"
+mkdir -p "$PROMO51_HOME_POSIX"
+PROMO51_HOME=$(win_path "$PROMO51_HOME_POSIX")
+PROMO51_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO51_HOME" run_hook memory-init.js "$PROMO51_CWD" "{\"cwd\":\"$PROMO51_CWD\",\"session_id\":\"promo51\"}")
+echo "$PROMO51_OUT" | grep -q "lesson promotion review" && fail "expected no nudge -- no lessons index exists at all, got: $PROMO51_OUT"
+pass "lesson-promotion nudge never fires when there is no lessons index to review"
+
+echo "=== Test 52: lesson-promotion nudge -- index touched again after watermark -> nudge fires again ==="
+PROMO52_HOME_POSIX="$WORK/promo52_home"
+mkdir -p "$PROMO52_HOME_POSIX/.claude/lessons" "$PROMO52_HOME_POSIX/.claude/promotion"
+PROMO52_HOME=$(win_path "$PROMO52_HOME_POSIX")
+PROMO52_CWD_POSIX="$WORK/promo52_cwd"
+mkdir -p "$PROMO52_CWD_POSIX"
+PROMO52_CWD=$(win_path "$PROMO52_CWD_POSIX")
+PROMO52_OLD_ISO=$(node -e "console.log(new Date(Date.now() - 3600*1000).toISOString())")
+node -e "require('fs').writeFileSync('$PROMO52_HOME/.claude/promotion/state.json', JSON.stringify({lastReviewedAt: '$PROMO52_OLD_ISO'}))"
+echo "- some-lesson: a generalizable rule (lessons/some-lesson.md)" > "$PROMO52_HOME_POSIX/.claude/lessons/index.md"
+# index.md's real mtime (just written, "now") is newer than the hour-old watermark above.
+PROMO52_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO52_HOME" run_hook memory-init.js "$PROMO52_CWD" "{\"cwd\":\"$PROMO52_CWD\",\"session_id\":\"promo52\"}")
+echo "$PROMO52_OUT" | grep -q "lesson promotion review" || fail "expected the nudge to fire again -- index changed after the last review, got: $PROMO52_OUT"
+pass "lesson-promotion nudge re-fires once the index changes again after a prior review"
+
+echo "=== Test 53: lesson-promotion nudge -- malformed watermark JSON fails open, never silently swallowed ==="
+PROMO53_HOME_POSIX="$WORK/promo53_home"
+mkdir -p "$PROMO53_HOME_POSIX/.claude/lessons" "$PROMO53_HOME_POSIX/.claude/promotion"
+PROMO53_HOME=$(win_path "$PROMO53_HOME_POSIX")
+PROMO53_CWD_POSIX="$WORK/promo53_cwd"
+mkdir -p "$PROMO53_CWD_POSIX"
+PROMO53_CWD=$(win_path "$PROMO53_CWD_POSIX")
+echo "- some-lesson: a generalizable rule (lessons/some-lesson.md)" > "$PROMO53_HOME_POSIX/.claude/lessons/index.md"
+echo "{not valid json" > "$PROMO53_HOME_POSIX/.claude/promotion/state.json"
+PROMO53_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO53_HOME" run_hook memory-init.js "$PROMO53_CWD" "{\"cwd\":\"$PROMO53_CWD\",\"session_id\":\"promo53\"}")
+echo "$PROMO53_OUT" | grep -q "lesson promotion review" || fail "expected the nudge to fire open on a malformed watermark file, got: $PROMO53_OUT"
+pass "lesson-promotion nudge fails open (fires) on a malformed promotion/state.json, never silently treated as reviewed"
+
+echo "=== Test 54: lesson-promotion nudge -- whitespace-only lessons index (all lessons promoted out) -> silent ==="
+PROMO54_HOME_POSIX="$WORK/promo54_home"
+mkdir -p "$PROMO54_HOME_POSIX/.claude/lessons"
+PROMO54_HOME=$(win_path "$PROMO54_HOME_POSIX")
+PROMO54_CWD_POSIX="$WORK/promo54_cwd"
+mkdir -p "$PROMO54_CWD_POSIX"
+PROMO54_CWD=$(win_path "$PROMO54_CWD_POSIX")
+printf '   \n\n  \n' > "$PROMO54_HOME_POSIX/.claude/lessons/index.md"
+PROMO54_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO54_HOME" run_hook memory-init.js "$PROMO54_CWD" "{\"cwd\":\"$PROMO54_CWD\",\"session_id\":\"promo54\"}")
+echo "$PROMO54_OUT" | grep -q "lesson promotion review" && fail "expected no nudge -- index exists but is whitespace-only (every lesson already promoted out), got: $PROMO54_OUT"
+pass "lesson-promotion nudge stays silent on a whitespace-only lessons index"
+
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true
