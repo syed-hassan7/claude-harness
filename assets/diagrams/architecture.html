@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagram</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --color-paper:   #FAF8F3;
+    --color-ink:     #23241F;
+    --color-muted:   #6B6C60;
+    --color-accent:  #8A6A00;
+    --font-sans:     'Geist', system-ui, sans-serif;
+    --font-serif:    'Instrument Serif', serif;
+    --font-mono:     'Geist Mono', ui-monospace, monospace;
+  }
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-paper);
+    color: var(--color-ink);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 2rem;
+  }
+  .frame { max-width: 1000px; width: 100%; }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+    font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem;
+  }
+  svg { width: 100%; min-width: 900px; display: block; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="eyebrow">Architecture · Diagram Design</p>
+  <h1>How the pack loads into a session</h1>
+  <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
+    <title id="arch-title">How claude-harness loads into a Claude Code session</title>
+    <desc id="arch-desc">install.sh writes a pointer block into CLAUDE.md, the one file Claude Code auto-loads every session; from there three tiers feed the session — always-on rules, task-triggered skills, and opt-in memory hooks including the three mechanical backstops.</desc>
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6B6C60"/></marker>
+      <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#8A6A00"/></marker>
+    </defs>
+
+    <rect width="100%" height="100%" fill="#FAF8F3"/>
+
+    <!-- ===== zones (bg -> zones -> arrows -> nodes) ===== -->
+    <rect x="64" y="248" width="256" height="160" rx="8" fill="rgba(35,36,31,0.02)" stroke="rgba(35,36,31,0.10)" stroke-width="0.8"/>
+    <rect x="120" y="252" width="144" height="12" rx="2" fill="#FAF8F3"/>
+    <text x="192" y="261" fill="rgba(35,36,31,0.45)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ALWAYS-ON</text>
+
+    <rect x="352" y="248" width="256" height="160" rx="8" fill="rgba(35,36,31,0.02)" stroke="rgba(35,36,31,0.10)" stroke-width="0.8"/>
+    <rect x="416" y="252" width="128" height="12" rx="2" fill="#FAF8F3"/>
+    <text x="480" y="261" fill="rgba(35,36,31,0.45)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">TRIGGERED</text>
+
+    <rect x="640" y="248" width="256" height="160" rx="8" fill="rgba(35,36,31,0.02)" stroke="rgba(35,36,31,0.10)" stroke-width="0.8"/>
+    <rect x="700" y="252" width="136" height="12" rx="2" fill="#FAF8F3"/>
+    <text x="768" y="261" fill="rgba(35,36,31,0.45)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">OPT-IN</text>
+
+    <!-- ===== arrows ===== -->
+    <!-- install.sh -> CLAUDE.md (straight, shared x) -->
+    <path d="M 480,88 V 140" fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+    <!-- CLAUDE.md -> Always-on (left elbow) -->
+    <path d="M 428,188 V 224 Q 428,232 420,232 H 200 Q 192,232 192,240 V 280"
+          fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <!-- CLAUDE.md -> Triggered (straight, shared x) -->
+    <path d="M 480,188 V 280" fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <!-- CLAUDE.md -> Opt-in (right elbow) -->
+    <path d="M 532,188 V 224 Q 532,232 540,232 H 760 Q 768,232 768,240 V 280"
+          fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+    <!-- Always-on -> session (elbow, converging) -->
+    <path d="M 192,344 V 460 Q 192,468 200,468 H 424 Q 432,468 432,476 V 500"
+          fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <!-- Triggered -> session (straight, shared x) -->
+    <path d="M 480,344 V 500" fill="none" stroke="#6B6C60" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <!-- Opt-in -> session (dashed elbow, optional) -->
+    <path d="M 768,344 V 460 Q 768,468 760,468 H 536 Q 528,468 528,476 V 500"
+          fill="none" stroke="#6B6C60" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+    <!-- ===== nodes ===== -->
+    <!-- install.sh -->
+    <rect x="380" y="40" width="200" height="48" rx="6" fill="#FAF8F3"/>
+    <rect x="380" y="40" width="200" height="48" rx="6" fill="#ffffff" stroke="#23241F" stroke-width="1"/>
+    <text x="480" y="60" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">install.sh</text>
+    <text x="480" y="76" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">idempotent installer</text>
+
+    <!-- CLAUDE.md -->
+    <rect x="380" y="140" width="200" height="48" rx="6" fill="#FAF8F3"/>
+    <rect x="380" y="140" width="200" height="48" rx="6" fill="rgba(35,36,31,0.05)" stroke="#6B6C60" stroke-width="1"/>
+    <text x="480" y="160" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">~/.claude/CLAUDE.md</text>
+    <text x="480" y="176" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">the file every session loads</text>
+
+    <!-- rules/ -->
+    <rect x="84" y="280" width="216" height="64" rx="6" fill="#FAF8F3"/>
+    <rect x="84" y="280" width="216" height="64" rx="6" fill="#ffffff" stroke="#23241F" stroke-width="1"/>
+    <text x="192" y="304" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">rules/</text>
+    <text x="192" y="320" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">engineering + security</text>
+    <text x="192" y="332" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">every session, no toggle</text>
+
+    <!-- skills/manifest.yaml -->
+    <rect x="372" y="280" width="216" height="64" rx="6" fill="#FAF8F3"/>
+    <rect x="372" y="280" width="216" height="64" rx="6" fill="#ffffff" stroke="#23241F" stroke-width="1"/>
+    <text x="480" y="304" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">skills/manifest.yaml</text>
+    <text x="480" y="320" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">55 skills, trigger: not a dial</text>
+    <text x="480" y="332" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">wakes on task shape</text>
+
+    <!-- memory/hooks -->
+    <rect x="660" y="280" width="216" height="64" rx="6" fill="#FAF8F3"/>
+    <rect x="660" y="280" width="216" height="64" rx="6" fill="rgba(35,36,31,0.02)" stroke="rgba(35,36,31,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="768" y="304" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">memory/hooks/</text>
+    <text x="768" y="320" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">3 mechanical backstops</text>
+    <text x="768" y="332" fill="#6B6C60" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">--with-memory-hooks</text>
+
+    <!-- Claude Code session (focal) -->
+    <rect x="380" y="500" width="200" height="64" rx="6" fill="rgba(138,106,0,0.08)"/>
+    <rect x="380" y="500" width="200" height="64" rx="6" fill="rgba(138,106,0,0.08)" stroke="#8A6A00" stroke-width="1.2"/>
+    <text x="480" y="528" fill="#23241F" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Claude Code session</text>
+    <text x="480" y="544" fill="#8A6A00" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">good judgment, good defaults</text>
+
+    <!-- legend -->
+    <line x1="30" y1="582" x2="930" y2="582" stroke="rgba(35,36,31,0.10)" stroke-width="0.8"/>
+    <text x="30" y="598" fill="#6B6C60" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">DASHED = OPT-IN, NOT WIRED BY DEFAULT</text>
+  </svg>
+</div>
+</body>
+</html>

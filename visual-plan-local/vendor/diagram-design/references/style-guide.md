@@ -6,6 +6,8 @@ Default skin is a cool editorial palette — white-smoke paper, jet-black ink, a
 
 To generate your own from a website URL, see [`onboarding.md`](onboarding.md).
 
+**This install is skinned to claude-harness's own palette** (onboarded 2026-08-25 via `onboarding.md`'s § Folder method, extracted from this repo's own `visual-plan-local/template.html` and `onboarding/report-template.html` — both already establish the same CSS custom properties: `--bg`, `--surface`, `--border`, `--text`, `--muted`, `--canary`, `--canary-soft`). Warm cream paper, near-black ink, gold/canary accent — matches every other artifact this repo has shipped this session. Typography kept as shipped (Instrument Serif / Geist / Geist Mono) — the palette request was about color, not the type system. Pristine shipped defaults snapshotted to `~/.diagram-design/profiles/default.md` before this overwrite, per `profiles.md`'s recovery rule.
+
 ---
 
 ## Tokens
@@ -16,20 +18,20 @@ Every token is referred to by **semantic role**, not by its hex value. Type refe
 
 | Role | Purpose | Default (light) | Default (dark) |
 |---|---|---|---|
-| `paper` | Page background, default node fill | `#f5f5f5` (white-smoke) | `#2d3142` (jet-black) |
-| `paper-2` | Diagram container bg, secondary fill | `#ececec` | `#393e53` |
-| `ink` | Primary text, primary stroke | `#2d3142` (jet-black) | `#f5f5f5` (white-smoke) |
-| `muted` | Secondary text, default arrow stroke | `#4f5d75` (blue-slate) | `#bfc0c0` (silver) |
-| `soft` | Sublabels, boundary labels | `#7a8399` | `#8e98ac` |
-| `rule` | Hairline borders | `rgba(45,49,66,0.12)` | `rgba(245,245,245,0.12)` |
-| `rule-solid` | Stronger borders, baselines | `#bfc0c0` (silver) | `rgba(191,192,192,0.25)` |
-| `accent` | Focal / 1–2 max per diagram | `#eb6c36` (atomic-tangerine) | `#f08a59` |
-| `accent-tint` | Fill for accent-bordered boxes | `rgba(235,108,54,0.08)` | `rgba(240,138,89,0.10)` |
-| `link` | HTTP/API calls, external arrows | `#2e5aa8` | `#6a95d8` |
+| `paper` | Page background, default node fill | `#FAF8F3` (warm cream) | `#14161B` (near-black) |
+| `paper-2` | Diagram container bg, secondary fill | `#F1EDE3` | `#1B1E24` |
+| `ink` | Primary text, primary stroke | `#23241F` (near-black) | `#E9E6DA` (warm cream) |
+| `muted` | Secondary text, default arrow stroke | `#6B6C60` (warm grey) | `#9A9C92` |
+| `soft` | Sublabels, boundary labels | `#84867A` | `#B0B2A6` |
+| `rule` | Hairline borders | `rgba(35,36,31,0.12)` | `rgba(233,230,218,0.12)` |
+| `rule-solid` | Stronger borders, baselines | `#DDD6C4` (warm tan) | `#2B2F37` |
+| `accent` | Focal / 1–2 max per diagram | `#8A6A00` (canary gold) | `#E8C547` |
+| `accent-tint` | Fill for accent-bordered boxes | `#F4E4A6` (canary-soft) | `#33300F` |
+| `link` | HTTP/API calls, external arrows | `#4A6C82` (slate-teal) | `#8FB4C7` |
 
-> **Brand palette source:** this skin maps to a five-color brand palette — `jet-black #2d3142`, `silver #bfc0c0`, `white-smoke #f5f5f5`, `atomic-tangerine #eb6c36`, `blue-slate #4f5d75`. The `soft`, `rule`, and `link` tokens are derived (lighter slate, ink-at-opacity, and a saturated variant in the blue-slate hue family) to cover roles the brand palette doesn't name directly.
+> **Brand palette source:** claude-harness's own established tokens (`visual-plan-local/template.html`, `onboarding/report-template.html`) — warm cream `#FAF8F3`, near-black `#23241F`, canary gold `#8A6A00`, warm grey `#6B6C60`. `soft`, `rule`, `rule-solid`, and `link` are derived to cover roles the 4-color source doesn't name directly: `soft` a lighter step off `muted`, `rule`/`rule-solid` an ink-opacity hairline and the source's own `#DDD6C4` border tone, `link` a slate-teal chosen to read as clearly distinct from the gold accent while staying warm-neutral compatible.
 
-> **Note:** The pre-baked example HTML files in `assets/` were built under an earlier skin. Regenerating them against the current `style-guide.md` is a v5.1 task. New diagrams the skill produces will use the tokens above.
+> **Note:** The pre-baked example HTML files in `assets/` were built under the original shipped skin, not this one. Regenerating them is a separate task — new diagrams this skill produces for claude-harness use the tokens above.
 
 ### Inversion rule (light → dark)
 
