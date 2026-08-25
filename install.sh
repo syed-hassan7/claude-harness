@@ -185,6 +185,22 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
     echo "[claude-harness] memory hooks installed at $PACK_DIR/memory/hooks (not wired into settings.json — see instructions below)"
   fi
   MEMORY_LINE="Memory spec + hooks (session checkpoints — opt-in, installed): \`$PACK_DIR_DISP/memory/SPEC.md\`, \`$PACK_DIR_DISP/memory/hooks/\`"
+  # Unlike the caveman wiring block below, this bucket has grown to 9 hook
+  # files across several sessions (canary-check.js -> review-gate-check.js ->
+  # design-lane-gate-check.js) -- a single-file proxy check (grep for just
+  # one filename) would go stale the moment a new hook is added to this list
+  # without a matching settings.json edit, so every current file is checked.
+  MEMORY_HOOKS_ALL_WIRED=1
+  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+    for hook_file in memory-init.js memory-recall.js canary-check.js review-gate-check.js design-lane-gate-check.js memory-checkpoint.js memory-architecture.js memory-compact.js memory-flush.js; do
+      grep -q "$hook_file" "$CLAUDE_DIR/settings.json" || MEMORY_HOOKS_ALL_WIRED=0
+    done
+  else
+    MEMORY_HOOKS_ALL_WIRED=0
+  fi
+  if [ "$MEMORY_HOOKS_ALL_WIRED" -eq 1 ]; then
+    echo "[claude-harness] memory hooks already fully wired in settings.json"
+  else
   cat <<EOF
 [claude-harness] Add this to ~/.claude/settings.json under "hooks" (MERGE into
 existing arrays — e.g. your SessionStart array already has other hooks,
@@ -219,6 +235,7 @@ own UserPromptSubmit hook below -- Claude Code runs all matching hooks for an
 event, none of them replace each other.
 Opt-in for a reason — new code, low-volume real-world testing so far. See memory/SPEC.md.
 EOF
+  fi
 elif [ -d "$PACK_DIR/memory/hooks" ]; then
   echo "[claude-harness] memory hooks already present at $PACK_DIR/memory/hooks (left in place — re-run with --with-memory-hooks to refresh)"
   MEMORY_LINE="Memory spec + hooks (session checkpoints — opt-in, installed): \`$PACK_DIR_DISP/memory/SPEC.md\`, \`$PACK_DIR_DISP/memory/hooks/\`"
