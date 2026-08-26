@@ -72,6 +72,14 @@ CLAUDE_DIR="${CLAUDE_HARNESS_TARGET:-$HOME/.claude}"
 PACK_DIR="$CLAUDE_DIR/claude-harness"
 CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 
+# Single source of truth for the memory-hooks file list -- both the install
+# step's MEMORY_HOOKS_ALL_WIRED check and --check's wiring-drift check need
+# every filename, and this bucket already grew from 4 to 10 files across
+# several sessions. One list, referenced twice, instead of two hardcoded
+# copies quietly drifting apart the moment an 11th hook is added to one but
+# not the other.
+MEMORY_HOOK_FILES="memory-init.js memory-recall.js canary-check.js review-gate-check.js design-lane-gate-check.js visual-plan-gate-check.js memory-checkpoint.js memory-architecture.js memory-compact.js memory-flush.js"
+
 # On Git Bash, $HOME/PACK_DIR/etc. are POSIX-style (/c/Users/...). That's fine
 # for this script's own file operations, but any path we WRITE into CLAUDE.md,
 # print as a settings.json snippet, or hand to `node -e` (--onboard's tier
@@ -115,6 +123,27 @@ if [ "$CHECK_MODE" -eq 1 ]; then
   # actually installed; its absence is expected default state, not drift.
   if [ -d "$PACK_DIR/memory/hooks" ]; then
     check_path "memory/hooks"
+  fi
+  # File-copy diff above only proves the hook files exist on disk — it says
+  # nothing about whether settings.json actually calls them. A hook can pass
+  # every check_path above and still never fire (visual-plan-gate-check.js
+  # shipped, tested, documented in d756c48, absent from settings.json the
+  # whole time — install.sh --check reported clean). Detect opt-in the same
+  # way the install step's own MEMORY_HOOKS_ALL_WIRED gate does: if settings.json
+  # mentions ANY hook filename, all of them must be present, or it's drift.
+  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+    ANY_WIRED=0
+    for hook_file in $MEMORY_HOOK_FILES; do
+      grep -q "$hook_file" "$CLAUDE_DIR/settings.json" && ANY_WIRED=1
+    done
+    if [ "$ANY_WIRED" -eq 1 ]; then
+      for hook_file in $MEMORY_HOOK_FILES; do
+        if ! grep -q "$hook_file" "$CLAUDE_DIR/settings.json"; then
+          echo "[claude-harness] NOT WIRED: $hook_file present on disk but missing from settings.json hooks"
+          DRIFT=1
+        fi
+      done
+    fi
   fi
   if [ "$DRIFT" -eq 0 ]; then
     echo "[claude-harness] pack matches source exactly — no drift"
@@ -193,7 +222,7 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
   # every current file is checked.
   MEMORY_HOOKS_ALL_WIRED=1
   if [ -f "$CLAUDE_DIR/settings.json" ]; then
-    for hook_file in memory-init.js memory-recall.js canary-check.js review-gate-check.js design-lane-gate-check.js visual-plan-gate-check.js memory-checkpoint.js memory-architecture.js memory-compact.js memory-flush.js; do
+    for hook_file in $MEMORY_HOOK_FILES; do
       grep -q "$hook_file" "$CLAUDE_DIR/settings.json" || MEMORY_HOOKS_ALL_WIRED=0
     done
   else

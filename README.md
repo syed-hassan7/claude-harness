@@ -5,7 +5,7 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.2.0-3b82f6.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-6.3.0-3b82f6.svg)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#12-using-it-today)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
@@ -99,15 +99,16 @@ Note-*content* stays agent-judgment to write, gated the same way lessons are. On
 
 ## 07 Mechanical backstops
 
-Three rules in this pack are written as "hard," not advisory — and all three used to rely entirely on the agent remembering to follow them. Each now has the same shape of backstop: a hook that notices after the fact, logs it, surfaces a reminder once, and never blocks anything.
+Four rules in this pack are written as "hard," not advisory — and all four used to rely entirely on the agent remembering to follow them. Each now has the same shape of backstop: a hook that notices after the fact, logs it, surfaces a reminder once, and never blocks anything. All four share one state/log/prune implementation in `memory/hooks/_lib.js` (extracted 2026-08-26, ~200 duplicated lines removed) — a new rule of this shape still needs its own file (`main()`'s read→branch→prune→write wiring isn't extracted, only the plumbing each step calls is), but that file no longer hand-rolls state persistence, locking, or idle-pruning from scratch.
 
-| Rule | Hook | Fires on | Doesn't check |
-|---|---|---|---|
-| Name Zarak when applying a pack rule (`WORKFLOW.md`) | `canary-check.js` | pack-file citation + name co-occurrence, per real turn | whether the rule's *substance* was actually followed |
-| Run `/review-loop`/`security-audit` before a commit (`CLAUDE.md`) | `review-gate-check.js` | a `git commit`, no review-marker evidence in-session | the review's own quality — only that one ran |
-| Render-before-judging on UI work (`rules/design-lane.md`) | `design-lane-gate-check.js` | a `git commit` touching a UI file, no screenshot/Playwright evidence in-session | whether the screenshot was actually looked at |
+| Rule | Hook | Fires on |
+|---|---|---|
+| Name Zarak when applying a pack rule (`WORKFLOW.md`) | `canary-check.js` | pack-file citation + name co-occurrence, per real turn |
+| Run `/review-loop`/`security-audit` before a commit (`CLAUDE.md`) | `review-gate-check.js` | a `git commit`, no review-marker evidence in-session |
+| Render-before-judging on UI work (`rules/design-lane.md`) | `design-lane-gate-check.js` | a `git commit` touching a UI file, no screenshot/Playwright evidence in-session |
+| `visual-plan-local` Artifact companion on a non-trivial plan (`WORKFLOW.md:44`) | `visual-plan-gate-check.js` | `ExitPlanMode` on a non-trivial plan, no `Artifact` publish in-session |
 
-Same design across all three: a sticky per-session flag, not re-armed per action (matches real usage — verify once, ship several times); a crisp structural trigger where one exists (a commit); log-and-surface-once, never gate. All three opt-in, ship inside `--with-memory-hooks`.
+Full design rationale, rejected alternatives, and state shape for each: `memory/SPEC.md`, one section per hook — canonical, not repeated here. All four opt-in, ship inside `--with-memory-hooks`; `install.sh --check` verifies they're actually wired into `settings.json`, not just present on disk.
 
 ## 08 In practice — receipts, not claims
 

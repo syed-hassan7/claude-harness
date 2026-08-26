@@ -1,31 +1,11 @@
 #!/usr/bin/env node
 'use strict';
-// UserPromptSubmit -- mechanical drift-canary miss detector. WORKFLOW.md's
-// drift canary ("name Zarak when actively applying a named pack rule/skill")
-// had no external check: the same fallible judgment that might skip applying
-// a rule also grades whether it named itself doing so, so a miss was
-// invisible to the agent that made it. This hook makes the *proxy signal*
-// (pack-file citation + name co-occurrence) mechanically checkable instead.
-//
-// Uses `transcript_path`, a common field on every hook event (confirmed
-// against code.claude.com/docs/en/hooks.md, 2026-08-24) -- NOT
-// `last_assistant_message` (Stop-only, and confirmed via search the same day
-// to be only the FINAL of potentially several assistant messages in a
-// multi-tool-call turn; earlier narration in that turn -- exactly where this
-// session's real misses landed -- is invisible to it). Reading transcript_path
-// from a UserPromptSubmit hook sidesteps the documented async-write lag: by
-// the time the next prompt fires, real wall-clock time has passed (the user
-// read the response and typed a reply), so the prior turn's lines have almost
-// certainly flushed. A cursor (byte offset) picks up any still-unflushed tail
-// on the following prompt instead of dropping it.
-//
-// Explicitly a detector, not a gate: never blocks, never grades rule
-// SUBSTANCE (that needs semantic judgment no hook can do -- see
-// memory/SPEC.md's "Canary-drift memory" section for the stated limit, and
-// its revisit condition if this proxy turns out not to be worth the noise).
+// Mechanical backstop for WORKFLOW.md's drift canary (name-drop proxy for
+// "a pack rule was actually applied"). Design rationale, rejected
+// alternatives, and state shape live in memory/SPEC.md's "Canary-drift
+// memory" section -- not duplicated here, see design-lane-gate-check.js's
+// header for why.
 
-const fs = require('fs');
-const path = require('path');
 const lib = require('./_lib');
 
 const PACK_FILES = [
@@ -104,14 +84,6 @@ function extractAssistantText(lines) {
   return chunks.join('\n');
 }
 
-function readJSON(p, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch (_) {
-    return fallback;
-  }
-}
-
 function main() {
   const input = lib.readHookInput();
   const cwd = input.cwd || process.cwd();
@@ -119,12 +91,9 @@ function main() {
   const transcriptPath = input.transcript_path || '';
   const { base } = lib.resolveScope(cwd);
 
-  const canaryDir = path.join(base, 'canary');
-  const statePath = path.join(canaryDir, 'state.json');
-  const logPath = path.join(canaryDir, 'log.md');
-  const lockPath = path.join(canaryDir, '.lock');
+  const { dir: canaryDir, statePath, logPath, lockPath } = lib.gatePaths(base, 'canary');
 
-  const state = readJSON(statePath, {});
+  const state = lib.readGateState(statePath);
   const sessState = state[sessionId] || { offset: 0, pending: null };
 
   const { lines, newOffset } = lib.readTranscriptSince(transcriptPath, sessState.offset);
@@ -161,13 +130,7 @@ function main() {
       }
     }
 
-    if (events.length) {
-      lib.ensureDir(canaryDir);
-      lib.ensureGitignore(canaryDir);
-      lib.withLock(lockPath, () => {
-        fs.appendFileSync(logPath, events.join('\n') + '\n');
-      });
-    }
+    if (events.length) lib.appendGateLog(canaryDir, logPath, lockPath, events);
   }
 
   // Prune idle sessions so state.json doesn't grow unbounded across months --
@@ -177,31 +140,14 @@ function main() {
   // first -- otherwise the audit trail just loses the miss silently instead
   // of closing it out.
   state[sessionId] = sessState;
-  const cutoff = Date.now() - SESSION_TTL_MS;
-  const expiredEvents = [];
-  for (const id of Object.keys(state)) {
-    const seen = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
-    if (!Number.isNaN(cutoff) && seen < cutoff) {
-      if (state[id] && state[id].pending) {
-        expiredEvents.push(
-          `EXPIRED | ${lib.nowISO()} | session ${id} | miss on ${state[id].pending.file} never resolved, pruned after 30d idle`
-        );
-      }
-      delete state[id];
-    }
-  }
-  if (expiredEvents.length) {
-    lib.ensureDir(canaryDir);
-    lib.ensureGitignore(canaryDir);
-    lib.withLock(lockPath, () => {
-      fs.appendFileSync(logPath, expiredEvents.join('\n') + '\n');
-    });
-  }
-  lib.ensureDir(canaryDir);
-  lib.ensureGitignore(canaryDir);
-  lib.withLock(lockPath, () => {
-    lib.atomicWrite(statePath, JSON.stringify(state));
+  lib.pruneIdleGateSessions(state, canaryDir, logPath, lockPath, {
+    ttlMs: SESSION_TTL_MS,
+    pendingFields: ['pending'],
+    describeExpired: (id, _field, s) =>
+      `EXPIRED | ${lib.nowISO()} | session ${id} | miss on ${s.pending.file} never resolved, pruned after 30d idle`,
   });
+
+  lib.writeGateState(canaryDir, statePath, lockPath, state);
 
   if (sessState.pending) {
     process.stdout.write(

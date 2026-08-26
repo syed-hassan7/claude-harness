@@ -2,6 +2,18 @@
 
 Full release history for claude-harness. See `README.md` for the current-state pitch — this file is the archive.
 
+## 6.3.0 — the harness audits its own token spend
+
+Two sessions building/extending this pack's own mechanical gate hooks both hit the same complaint: build cost far exceeding what the diff justified, despite two prior lessons (batch watched-file edits, scope subagent prompts) already live and applied correctly. Root cause found, not just re-flagged: both lessons cut cost *per step*; neither touches step *count*, and the newest hook of the four (`visual-plan-gate-check.js`, shipped and tested in 6.2.0's follow-on commit) had never actually been wired into `settings.json` — full authoring/test/doc cost paid, zero runtime effect, undetected because `install.sh --check` only diffed file copies.
+
+- **`install.sh --check` now verifies hook wiring, not just file presence** — conditioned on detectable opt-in (if any hook filename appears in `settings.json`, all must). Catches exactly the dead-hook bug above.
+- **All 4 gate hooks consolidated onto shared `_lib.js` scaffolding** (`gatePaths`/`readGateState`/`appendGateLog`/`writeGateState`/`pruneIdleGateSessions`) — ~200 duplicated lines removed, zero behavior change (same 71-test suite, unmodified, all green before and after). A new gate of this shape no longer hand-rolls state persistence/locking/idle-pruning from scratch.
+- **Per-hook header comments trimmed** to a one-line pointer at `memory/SPEC.md` (which already carried the full rationale verbatim) — the hooks were violating this pack's own context-economy rule while documenting rules for everyone else.
+- **`cost=` field added to the episodic task-log format** — a coarse per-task estimate, not instrumented telemetry, so future retros compare numbers instead of relying on how a session felt.
+- **`WORKFLOW.md:44`'s plan-mode default restored its own skip clause** for trivial work — `visual-plan-local/references/plan-discipline.md` already had it; the summary bullet everyone actually reads had silently dropped it.
+- **Doc quadruplication caught mid-fix, twice.** The task-log format itself was restated inline in three places (template, `WORKFLOW.md`, `memory/SPEC.md`) — one was fixed as fix #4 above, the other two only surfaced when the fix was checked with a second pass. All three now point to the template as the single source of truth instead of restating fields.
+- Full audit + fix pass reviewed by a second pass before commit (not a full `/review-loop` — doc-only or 100%-test-covered-refactor changes don't warrant the CodeRabbit round-trip; noted explicitly rather than silently skipped, which is itself the proportionality argument this release is about).
+
 ## 6.2.0 — lessons stop being a store that only grows
 
 A cross-repo memory-system review (q-agent-harness, mex-memory) checked against this pack's own `memory/SPEC.md` found a real, code-level gap: `memory-init.js`'s lessons-index truncation keeps the *first* 8000 bytes and drops the rest, so without any way to graduate a durable lesson out, new lessons eventually stop appearing in the injected `SessionStart` context while old ones squat at the front forever — the one dimension of this pack's memory layer that got worse, not better, with use.

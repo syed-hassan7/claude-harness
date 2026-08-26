@@ -1,54 +1,14 @@
 #!/usr/bin/env node
 'use strict';
-// Dual-registered: PostToolUse (matcher: Edit|Write|Read|Bash|mcp__playwright.*)
-// AND UserPromptSubmit -- same file, branches on whether `tool_name` is
-// present in the stdin payload. Mechanical backstop for a second gap of the
-// same shape as review-gate-check.js: rules/design-lane.md's
-// render-before-judging step is called "hard, not optional" but nothing
-// mechanically checks whether it actually happened before UI work shipped.
-//
-// Detection is almost entirely structural, not a transcript text scan --
-// deliberately different from canary-check.js/review-gate-check.js. The
-// obvious first design (scan transcript text for "done"/"looks good"/
-// "verified") was rejected during planning: caveman-ultra style uses those
-// words constantly for unrelated work in the same session, so it would
-// false-positive far more than it would catch. Instead:
-//   - uiTouched sets from Edit/Write on a UI-extension file (tsx/jsx/vue/
-//     svelte/css/scss/less/html) -- tool_input.file_path is an exact field,
-//     no proxy-text-matching needed.
-//   - screenshotSeen sets from Read on an image file, any mcp__playwright.*
-//     tool call, or (one narrow exception) a Bash command mentioning
-//     "playwright" specifically -- this IS a proxy-text match, same limited
-//     class as review-gate-check.js's marker scan, kept deliberately narrow
-//     (playwright only, not a bare "screenshot" word -- that alone showed up
-//     in ordinary commit messages like "fix screenshot upload" during
-//     review, which would have satisfied evidence for reasons unrelated to
-//     verification actually happening).
-//   - The crisp trigger stays the commit event (lib.isGitCommitCommand,
-//     shared with review-gate-check.js) -- reusing the one trigger already
-//     proven low-noise rather than inventing a second, noisier one.
-//
-// Sticky per session, not per commit, same accepted trade-off as
-// review-gate-check.js: one screenshot anywhere satisfies every later
-// commit; one UI-file edit anywhere primes every later commit for the
-// check. Never blocks -- same posture as every hook in this pack.
-//
-// Second, independent check added 2026-08-26: a native form control
-// (<select>, <input type="date/time/color/range/month/week">) landing in a
-// UI-file Edit/Write fires immediately (not deferred to a commit event --
-// there's no "give it time to verify" reason to wait, the pattern's
-// presence is a fact the moment it's typed). Different concern from
-// uiTouched/screenshotSeen above: awareness
-// that screenshot verification has a structural blind spot for this whole
-// component class (native popup chrome is OS-rendered, invisible to
-// tab-viewport capture -- confirmed against Chromium issue #170322, a
-// platform limitation, not a Playwright-specific gap), not whether a
-// screenshot happened at all. Own pending slot (pendingNativeControl),
-// separate from the screenshot-MISS's pending -- two independent concerns
-// sharing one slot would let one nudge silently overwrite the other.
+// Mechanical backstop for rules/design-lane.md's render-before-judging gate
+// (screenshot/Playwright evidence before UI work ships) and its native-form-
+// control blind spot. Design rationale, rejected alternatives, and the
+// native-control addition's incident writeup live in memory/SPEC.md's
+// "Design-lane gate memory" section -- not duplicated here per
+// rules/engineering.md's context-economy section (push detail to the doc
+// that already owns it, don't re-derive it in a header comment on every hook
+// this shape gets applied to).
 
-const fs = require('fs');
-const path = require('path');
 const lib = require('./_lib');
 
 const UI_FILE_RE = /\.(tsx|jsx|vue|svelte|css|scss|less|html)$/i;
@@ -63,51 +23,6 @@ const NATIVE_SELECT_RE = /<select[\s/>]/;
 // common wrapped pattern in practice. Caught at review, not shipped as-is.
 const NATIVE_INPUT_RE = /<input\s+[^>]*type=["'](?:date|time|color|range|month|week)["']/;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune state entries idle > 30 days
-
-function readJSON(p, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function paths(base) {
-  const dir = path.join(base, 'design-lane-gate');
-  return {
-    dir,
-    statePath: path.join(dir, 'state.json'),
-    logPath: path.join(dir, 'log.md'),
-    lockPath: path.join(dir, '.lock'),
-  };
-}
-
-function appendLog(dir, logPath, lockPath, lines) {
-  if (!lines.length) return;
-  lib.ensureDir(dir);
-  lib.ensureGitignore(dir);
-  lib.withLock(lockPath, () => {
-    fs.appendFileSync(logPath, lines.join('\n') + '\n');
-  });
-}
-
-function pruneIdle(state, dir, logPath, lockPath) {
-  const cutoff = Date.now() - SESSION_TTL_MS;
-  const expired = [];
-  for (const id of Object.keys(state)) {
-    const seen = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
-    if (!Number.isNaN(cutoff) && seen < cutoff) {
-      if (state[id] && state[id].pending) {
-        expired.push(`EXPIRED | ${lib.nowISO()} | session ${id} | design-lane MISS never surfaced, pruned after 30d idle`);
-      }
-      if (state[id] && state[id].pendingNativeControl) {
-        expired.push(`EXPIRED | ${lib.nowISO()} | session ${id} | native-control nudge never surfaced, pruned after 30d idle`);
-      }
-      delete state[id];
-    }
-  }
-  appendLog(dir, logPath, lockPath, expired);
-}
 
 // Cheap pre-check, before any disk I/O -- mirrors memory-architecture.js's
 // own early-return-before-touching-state pattern. An Edit/Write on a non-UI
@@ -136,7 +51,7 @@ function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) 
       const addedText = toolName === 'Edit' ? (toolInput.new_string || '') : (toolInput.content || '');
       if (NATIVE_SELECT_RE.test(addedText) || NATIVE_INPUT_RE.test(addedText)) {
         sessState.pendingNativeControl = { at: lib.nowISO(), file: filePath };
-        appendLog(dir, logPath, lockPath, [
+        lib.appendGateLog(dir, logPath, lockPath, [
           `NATIVE | ${lib.nowISO()} | session ${sessionId} | native form control added in ${filePath} -- screenshot verification has a blind spot for this component class (see rules/design-lane.md anti-patterns)`,
         ]);
       }
@@ -162,7 +77,7 @@ function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) 
     if (SCREENSHOT_MARKER_RE.test(command)) sessState.screenshotSeen = true;
     if (lib.isGitCommitCommand(command) && sessState.uiTouched && !hadScreenshotEvidence) {
       sessState.pending = { at: lib.nowISO() };
-      appendLog(dir, logPath, lockPath, [
+      lib.appendGateLog(dir, logPath, lockPath, [
         `MISS | ${lib.nowISO()} | session ${sessionId} | commit ran, UI file touched this session, no screenshot/Playwright evidence found`,
       ]);
     }
@@ -206,9 +121,9 @@ function main() {
   const cwd = input.cwd || process.cwd();
   const sessionId = input.session_id || 'unknown';
   const { base } = lib.resolveScope(cwd);
-  const { dir, statePath, logPath, lockPath } = paths(base);
+  const { dir, statePath, logPath, lockPath } = lib.gatePaths(base, 'design-lane-gate');
 
-  const state = readJSON(statePath, {});
+  const state = lib.readGateState(statePath);
   const sessState = state[sessionId] || { uiTouched: false, screenshotSeen: false, pending: null, pendingNativeControl: null };
 
   let output = null;
@@ -220,13 +135,16 @@ function main() {
 
   sessState.lastSeen = lib.nowISO();
   state[sessionId] = sessState;
-  pruneIdle(state, dir, logPath, lockPath);
-
-  lib.ensureDir(dir);
-  lib.ensureGitignore(dir);
-  lib.withLock(lockPath, () => {
-    lib.atomicWrite(statePath, JSON.stringify(state));
+  lib.pruneIdleGateSessions(state, dir, logPath, lockPath, {
+    ttlMs: SESSION_TTL_MS,
+    pendingFields: ['pending', 'pendingNativeControl'],
+    describeExpired: (id, field) =>
+      field === 'pendingNativeControl'
+        ? `EXPIRED | ${lib.nowISO()} | session ${id} | native-control nudge never surfaced, pruned after 30d idle`
+        : `EXPIRED | ${lib.nowISO()} | session ${id} | design-lane MISS never surfaced, pruned after 30d idle`,
   });
+
+  lib.writeGateState(dir, statePath, lockPath, state);
 
   if (output) process.stdout.write(JSON.stringify(output));
 }

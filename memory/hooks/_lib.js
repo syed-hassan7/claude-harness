@@ -339,6 +339,67 @@ function flagIndexLineStale(indexPath, noteId) {
   return changed;
 }
 
+// ---- Gate-hook scaffolding, shared by canary-check.js/review-gate-check.js/
+// design-lane-gate-check.js/visual-plan-gate-check.js. All 4 independently
+// duplicated this exact shape (own state dir under <base>/<gateName>/, own
+// readJSON/appendLog/pruneIdle/final-write) before this consolidation --
+// extracted here instead of left duplicated a 5th time for the next gate.
+
+function gatePaths(base, gateName) {
+  const dir = path.join(base, gateName);
+  return {
+    dir,
+    statePath: path.join(dir, 'state.json'),
+    logPath: path.join(dir, 'log.md'),
+    lockPath: path.join(dir, '.lock'),
+  };
+}
+
+function readGateState(statePath) {
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch (_) {
+    return {};
+  }
+}
+
+function appendGateLog(dir, logPath, lockPath, lines) {
+  if (!lines || !lines.length) return;
+  ensureDir(dir);
+  ensureGitignore(dir);
+  withLock(lockPath, () => {
+    fs.appendFileSync(logPath, lines.join('\n') + '\n');
+  });
+}
+
+function writeGateState(dir, statePath, lockPath, state) {
+  ensureDir(dir);
+  ensureGitignore(dir);
+  withLock(lockPath, () => {
+    atomicWrite(statePath, JSON.stringify(state));
+  });
+}
+
+// Generic idle-session prune: any session whose lastSeen is older than ttlMs
+// is dropped. `pendingFields` lists the state keys that count as "an
+// unresolved miss" -- each still-truthy field on a pruned session gets one
+// EXPIRED line via `describeExpired(sessionId, fieldName, sessState)`, so the
+// audit trail never silently loses a miss instead of closing it out.
+function pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFields, describeExpired }) {
+  const cutoff = Date.now() - ttlMs;
+  const expired = [];
+  for (const id of Object.keys(state)) {
+    const seen = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
+    if (!Number.isNaN(cutoff) && seen < cutoff) {
+      for (const field of pendingFields) {
+        if (state[id] && state[id][field]) expired.push(describeExpired(id, field, state[id]));
+      }
+      delete state[id];
+    }
+  }
+  appendGateLog(dir, logPath, lockPath, expired);
+}
+
 module.exports = {
   readHookInput,
   homeDir,
@@ -362,4 +423,9 @@ module.exports = {
   extractSection,
   readWatchMap,
   flagIndexLineStale,
+  gatePaths,
+  readGateState,
+  appendGateLog,
+  writeGateState,
+  pruneIdleGateSessions,
 };
