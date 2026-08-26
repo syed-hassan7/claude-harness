@@ -181,7 +181,7 @@ CP2="$FAKE_HOME/.claude/session/checkpoint.md"
 grep -q "$FAKE_AWS_KEY" "$CP2" && fail "raw secret pattern leaked into checkpoint" || pass "secret pattern redacted"
 
 echo "=== Test 11: malformed / empty stdin never crashes a hook (fail-open) ==="
-for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js review-gate-check.js design-lane-gate-check.js; do
+for script in memory-init.js memory-checkpoint.js memory-compact.js memory-flush.js memory-recall.js memory-architecture.js canary-check.js review-gate-check.js design-lane-gate-check.js visual-plan-gate-check.js; do
   (cd "$NONGIT_CWD" && echo "" | node "$HOOKS/$script") > "$WORK/hookout" 2>"$WORK/hookerr"
   CODE=$?
   [ "$CODE" -eq 0 ] || fail "$script exited nonzero ($CODE) on empty stdin: $(cat "$WORK/hookerr")"
@@ -774,6 +774,171 @@ printf '   \n\n  \n' > "$PROMO54_HOME_POSIX/.claude/lessons/index.md"
 PROMO54_OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$PROMO54_HOME" run_hook memory-init.js "$PROMO54_CWD" "{\"cwd\":\"$PROMO54_CWD\",\"session_id\":\"promo54\"}")
 echo "$PROMO54_OUT" | grep -q "lesson promotion review" && fail "expected no nudge -- index exists but is whitespace-only (every lesson already promoted out), got: $PROMO54_OUT"
 pass "lesson-promotion nudge stays silent on a whitespace-only lessons index"
+
+echo "=== Test 55: design-lane-gate-check.js -- native <select> added in a UI file surfaces a next-turn nudge ==="
+DLG55_PROJECT_POSIX="$WORK/dlg55_project"
+mkdir -p "$DLG55_PROJECT_POSIX"
+(cd "$DLG55_PROJECT_POSIX" && git init -q)
+DLG55_PROJECT=$(win_path "$DLG55_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG55_PROJECT" '{"cwd":"'"$DLG55_PROJECT"'","session_id":"dlgS55","tool_name":"Edit","tool_input":{"file_path":"src/components/VendorDetail.tsx","new_string":"<select value={x} onChange={y}><option>A</option></select>"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG55_PROJECT" '{"cwd":"'"$DLG55_PROJECT"'","session_id":"dlgS55"}')
+echo "$OUT" | grep -q "native-control blind spot" || fail "expected a native-control nudge after adding <select>, got: $OUT"
+pass "design-lane-gate-check.js surfaces a native-control nudge when <select> is added"
+
+echo "=== Test 56: design-lane-gate-check.js -- self-closing <select /> also fires the native-control nudge ==="
+DLG56_PROJECT_POSIX="$WORK/dlg56_project"
+mkdir -p "$DLG56_PROJECT_POSIX"
+(cd "$DLG56_PROJECT_POSIX" && git init -q)
+DLG56_PROJECT=$(win_path "$DLG56_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG56_PROJECT" '{"cwd":"'"$DLG56_PROJECT"'","session_id":"dlgS56","tool_name":"Write","tool_input":{"file_path":"src/components/Picker.jsx","content":"const Picker = () => <select />;"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG56_PROJECT" '{"cwd":"'"$DLG56_PROJECT"'","session_id":"dlgS56"}')
+echo "$OUT" | grep -q "native-control blind spot" || fail "expected a native-control nudge for self-closing <select />, got: $OUT"
+pass "design-lane-gate-check.js catches a self-closing <select /> too"
+
+echo "=== Test 57: design-lane-gate-check.js -- native <input type=\"date\"> also fires the native-control nudge ==="
+DLG57_PROJECT_POSIX="$WORK/dlg57_project"
+mkdir -p "$DLG57_PROJECT_POSIX"
+(cd "$DLG57_PROJECT_POSIX" && git init -q)
+DLG57_PROJECT=$(win_path "$DLG57_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG57_PROJECT" '{"cwd":"'"$DLG57_PROJECT"'","session_id":"dlgS57","tool_name":"Edit","tool_input":{"file_path":"src/components/Filters.tsx","new_string":"<input type=\"date\" value={d} />"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG57_PROJECT" '{"cwd":"'"$DLG57_PROJECT"'","session_id":"dlgS57"}')
+echo "$OUT" | grep -q "native-control blind spot" || fail "expected a native-control nudge for <input type=\"date\">, got: $OUT"
+pass "design-lane-gate-check.js catches native <input type=\"date\"> too"
+
+echo "=== Test 58: design-lane-gate-check.js -- a capitalized custom <Select> component does not false-positive ==="
+DLG58_PROJECT_POSIX="$WORK/dlg58_project"
+mkdir -p "$DLG58_PROJECT_POSIX"
+(cd "$DLG58_PROJECT_POSIX" && git init -q)
+DLG58_PROJECT=$(win_path "$DLG58_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG58_PROJECT" '{"cwd":"'"$DLG58_PROJECT"'","session_id":"dlgS58","tool_name":"Edit","tool_input":{"file_path":"src/components/Filters.tsx","new_string":"<Select value={d} options={opts} />"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG58_PROJECT" '{"cwd":"'"$DLG58_PROJECT"'","session_id":"dlgS58"}')
+echo "$OUT" | grep -q "native-control blind spot" && fail "a capitalized custom <Select> component must not be treated as a native control, got: $OUT"
+pass "design-lane-gate-check.js does not false-positive on a custom <Select> component"
+
+echo "=== Test 58b: design-lane-gate-check.js -- a capitalized custom <Input type=\"date\"> component does not false-positive ==="
+DLG58B_PROJECT_POSIX="$WORK/dlg58b_project"
+mkdir -p "$DLG58B_PROJECT_POSIX"
+(cd "$DLG58B_PROJECT_POSIX" && git init -q)
+DLG58B_PROJECT=$(win_path "$DLG58B_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG58B_PROJECT" '{"cwd":"'"$DLG58B_PROJECT"'","session_id":"dlgS58b","tool_name":"Edit","tool_input":{"file_path":"src/components/Filters.tsx","new_string":"<Input type=\"date\" value={d} onChange={y} />"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG58B_PROJECT" '{"cwd":"'"$DLG58B_PROJECT"'","session_id":"dlgS58b"}')
+echo "$OUT" | grep -q "native-control blind spot" && fail "a capitalized custom <Input type=\"date\"> component must not be treated as a native control, got: $OUT"
+pass "design-lane-gate-check.js does not false-positive on a custom <Input type=\"date\"> component"
+
+echo "=== Test 59: design-lane-gate-check.js -- native-control nudge is independent of the screenshot-MISS pending, neither overwrites the other ==="
+DLG59_PROJECT_POSIX="$WORK/dlg59_project"
+mkdir -p "$DLG59_PROJECT_POSIX"
+(cd "$DLG59_PROJECT_POSIX" && git init -q)
+DLG59_PROJECT=$(win_path "$DLG59_PROJECT_POSIX")
+run_hook design-lane-gate-check.js "$DLG59_PROJECT" '{"cwd":"'"$DLG59_PROJECT"'","session_id":"dlgS59","tool_name":"Edit","tool_input":{"file_path":"src/components/Card.tsx"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG59_PROJECT" '{"cwd":"'"$DLG59_PROJECT"'","session_id":"dlgS59","tool_name":"Bash","tool_input":{"command":"git commit -m \"card\""}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLG59_PROJECT" '{"cwd":"'"$DLG59_PROJECT"'","session_id":"dlgS59","tool_name":"Edit","tool_input":{"file_path":"src/components/Card.tsx","new_string":"<select><option>x</option></select>"}}' > /dev/null
+OUT=$(run_hook design-lane-gate-check.js "$DLG59_PROJECT" '{"cwd":"'"$DLG59_PROJECT"'","session_id":"dlgS59"}')
+echo "$OUT" | grep -q "design-lane gate miss" || fail "expected the screenshot-MISS block too, got: $OUT"
+echo "$OUT" | grep -q "native-control blind spot" || fail "expected the native-control block alongside the screenshot-MISS, got: $OUT"
+pass "design-lane-gate-check.js surfaces both nudges together when both are pending, neither overwrites the other"
+
+echo "=== Test 60: visual-plan-gate-check.js -- non-trivial plan file + ExitPlanMode with no Artifact publish logs a MISS ==="
+VPG60_HOME_POSIX="$WORK/vpg60_home"
+mkdir -p "$VPG60_HOME_POSIX/.claude/plans"
+VPG60_HOME=$(win_path "$VPG60_HOME_POSIX")
+VPG60_CWD_POSIX="$WORK/vpg60_cwd"
+mkdir -p "$VPG60_CWD_POSIX"
+VPG60_CWD=$(win_path "$VPG60_CWD_POSIX")
+VPG60_PLANS_WIN=$(win_path "$VPG60_HOME_POSIX/.claude/plans")
+VPG60_PLAN="$VPG60_PLANS_WIN/test-plan.md"
+{ printf '# Plan\n\n'; printf '%1300s' | tr ' ' 'x'; printf '\n'; } > "$VPG60_HOME_POSIX/.claude/plans/test-plan.md"
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG60_HOME" run_hook visual-plan-gate-check.js "$VPG60_CWD" '{"cwd":"'"$VPG60_CWD"'","session_id":"vpgS60","tool_name":"Write","tool_input":{"file_path":"'"$VPG60_PLAN"'","content":"placeholder"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG60_HOME" run_hook visual-plan-gate-check.js "$VPG60_CWD" '{"cwd":"'"$VPG60_CWD"'","session_id":"vpgS60","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG60_HOME" run_hook visual-plan-gate-check.js "$VPG60_CWD" '{"cwd":"'"$VPG60_CWD"'","session_id":"vpgS60"}')
+echo "$OUT" | grep -q "visual-plan gate miss" || fail "expected a visual-plan gate MISS for a non-trivial plan with no Artifact, got: $OUT"
+pass "visual-plan-gate-check.js logs a MISS when a non-trivial plan exits plan mode with no Artifact publish"
+
+echo "=== Test 61: visual-plan-gate-check.js -- Artifact published before ExitPlanMode suppresses the MISS ==="
+VPG61_HOME_POSIX="$WORK/vpg61_home"
+mkdir -p "$VPG61_HOME_POSIX/.claude/plans"
+VPG61_HOME=$(win_path "$VPG61_HOME_POSIX")
+VPG61_CWD_POSIX="$WORK/vpg61_cwd"
+mkdir -p "$VPG61_CWD_POSIX"
+VPG61_CWD=$(win_path "$VPG61_CWD_POSIX")
+VPG61_PLANS_WIN=$(win_path "$VPG61_HOME_POSIX/.claude/plans")
+VPG61_PLAN="$VPG61_PLANS_WIN/test-plan.md"
+{ printf '# Plan\n\n'; printf '%1300s' | tr ' ' 'x'; printf '\n'; } > "$VPG61_HOME_POSIX/.claude/plans/test-plan.md"
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG61_HOME" run_hook visual-plan-gate-check.js "$VPG61_CWD" '{"cwd":"'"$VPG61_CWD"'","session_id":"vpgS61","tool_name":"Write","tool_input":{"file_path":"'"$VPG61_PLAN"'","content":"placeholder"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG61_HOME" run_hook visual-plan-gate-check.js "$VPG61_CWD" '{"cwd":"'"$VPG61_CWD"'","session_id":"vpgS61","tool_name":"Artifact","tool_input":{"file_path":"scratch.html"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG61_HOME" run_hook visual-plan-gate-check.js "$VPG61_CWD" '{"cwd":"'"$VPG61_CWD"'","session_id":"vpgS61","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG61_HOME" run_hook visual-plan-gate-check.js "$VPG61_CWD" '{"cwd":"'"$VPG61_CWD"'","session_id":"vpgS61"}')
+echo "$OUT" | grep -q "visual-plan gate miss" && fail "an Artifact published before ExitPlanMode should suppress the MISS, got: $OUT"
+pass "visual-plan-gate-check.js stays silent when an Artifact was published before ExitPlanMode"
+
+echo "=== Test 62: visual-plan-gate-check.js -- a trivial (short) plan stays silent even with no Artifact ==="
+VPG62_HOME_POSIX="$WORK/vpg62_home"
+mkdir -p "$VPG62_HOME_POSIX/.claude/plans"
+VPG62_HOME=$(win_path "$VPG62_HOME_POSIX")
+VPG62_CWD_POSIX="$WORK/vpg62_cwd"
+mkdir -p "$VPG62_CWD_POSIX"
+VPG62_CWD=$(win_path "$VPG62_CWD_POSIX")
+VPG62_PLANS_WIN=$(win_path "$VPG62_HOME_POSIX/.claude/plans")
+VPG62_PLAN="$VPG62_PLANS_WIN/test-plan.md"
+printf '# Fix a typo\n\nChange "recieve" to "receive" in README.md.\n' > "$VPG62_HOME_POSIX/.claude/plans/test-plan.md"
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62_HOME" run_hook visual-plan-gate-check.js "$VPG62_CWD" '{"cwd":"'"$VPG62_CWD"'","session_id":"vpgS62","tool_name":"Write","tool_input":{"file_path":"'"$VPG62_PLAN"'","content":"placeholder"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62_HOME" run_hook visual-plan-gate-check.js "$VPG62_CWD" '{"cwd":"'"$VPG62_CWD"'","session_id":"vpgS62","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62_HOME" run_hook visual-plan-gate-check.js "$VPG62_CWD" '{"cwd":"'"$VPG62_CWD"'","session_id":"vpgS62"}')
+echo "$OUT" | grep -q "visual-plan gate miss" && fail "a trivial short plan should never trigger a MISS, got: $OUT"
+pass "visual-plan-gate-check.js stays silent for a genuinely trivial plan"
+
+echo "=== Test 62b: visual-plan-gate-check.js -- short plan with 2+ file-path mentions is non-trivial by the file-mention branch, logs a MISS ==="
+VPG62B_HOME_POSIX="$WORK/vpg62b_home"
+mkdir -p "$VPG62B_HOME_POSIX/.claude/plans"
+VPG62B_HOME=$(win_path "$VPG62B_HOME_POSIX")
+VPG62B_CWD_POSIX="$WORK/vpg62b_cwd"
+mkdir -p "$VPG62B_CWD_POSIX"
+VPG62B_CWD=$(win_path "$VPG62B_CWD_POSIX")
+VPG62B_PLANS_WIN=$(win_path "$VPG62B_HOME_POSIX/.claude/plans")
+VPG62B_PLAN="$VPG62B_PLANS_WIN/test-plan.md"
+printf '# Plan\n\n## Files to change\n- `src/App.tsx`\n- `src/utils/helpers.ts`\n' > "$VPG62B_HOME_POSIX/.claude/plans/test-plan.md"
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62B_HOME" run_hook visual-plan-gate-check.js "$VPG62B_CWD" '{"cwd":"'"$VPG62B_CWD"'","session_id":"vpgS62b","tool_name":"Write","tool_input":{"file_path":"'"$VPG62B_PLAN"'","content":"placeholder"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62B_HOME" run_hook visual-plan-gate-check.js "$VPG62B_CWD" '{"cwd":"'"$VPG62B_CWD"'","session_id":"vpgS62b","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62B_HOME" run_hook visual-plan-gate-check.js "$VPG62B_CWD" '{"cwd":"'"$VPG62B_CWD"'","session_id":"vpgS62b"}')
+echo "$OUT" | grep -q "visual-plan gate miss" || fail "expected a MISS via the file-mention branch (short plan, 2+ file paths), got: $OUT"
+pass "visual-plan-gate-check.js's file-mention non-trivial branch fires independent of the length branch"
+
+echo "=== Test 62c: visual-plan-gate-check.js -- short plan with only 1 file-path mention stays under both non-trivial thresholds, silent ==="
+VPG62C_HOME_POSIX="$WORK/vpg62c_home"
+mkdir -p "$VPG62C_HOME_POSIX/.claude/plans"
+VPG62C_HOME=$(win_path "$VPG62C_HOME_POSIX")
+VPG62C_CWD_POSIX="$WORK/vpg62c_cwd"
+mkdir -p "$VPG62C_CWD_POSIX"
+VPG62C_CWD=$(win_path "$VPG62C_CWD_POSIX")
+VPG62C_PLANS_WIN=$(win_path "$VPG62C_HOME_POSIX/.claude/plans")
+VPG62C_PLAN="$VPG62C_PLANS_WIN/test-plan.md"
+printf '# Plan\n\nTouches `src/App.tsx` only.\n' > "$VPG62C_HOME_POSIX/.claude/plans/test-plan.md"
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62C_HOME" run_hook visual-plan-gate-check.js "$VPG62C_CWD" '{"cwd":"'"$VPG62C_CWD"'","session_id":"vpgS62c","tool_name":"Write","tool_input":{"file_path":"'"$VPG62C_PLAN"'","content":"placeholder"}}' > /dev/null
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62C_HOME" run_hook visual-plan-gate-check.js "$VPG62C_CWD" '{"cwd":"'"$VPG62C_CWD"'","session_id":"vpgS62c","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG62C_HOME" run_hook visual-plan-gate-check.js "$VPG62C_CWD" '{"cwd":"'"$VPG62C_CWD"'","session_id":"vpgS62c"}')
+echo "$OUT" | grep -q "visual-plan gate miss" && fail "a single file-path mention under the length threshold should stay trivial, got: $OUT"
+pass "visual-plan-gate-check.js stays silent when only one file-path mention exists and length is under threshold"
+
+echo "=== Test 63: visual-plan-gate-check.js -- ExitPlanMode with no tracked plan file fails open (no crash, no MISS) ==="
+VPG63_HOME_POSIX="$WORK/vpg63_home"
+mkdir -p "$VPG63_HOME_POSIX/.claude/plans"
+VPG63_HOME=$(win_path "$VPG63_HOME_POSIX")
+VPG63_CWD_POSIX="$WORK/vpg63_cwd"
+mkdir -p "$VPG63_CWD_POSIX"
+VPG63_CWD=$(win_path "$VPG63_CWD_POSIX")
+CLAUDE_HARNESS_HOME_OVERRIDE="$VPG63_HOME" run_hook visual-plan-gate-check.js "$VPG63_CWD" '{"cwd":"'"$VPG63_CWD"'","session_id":"vpgS63","tool_name":"ExitPlanMode","tool_input":{}}' > /dev/null || fail "visual-plan-gate-check.js must not crash on ExitPlanMode with no tracked plan file"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$VPG63_HOME" run_hook visual-plan-gate-check.js "$VPG63_CWD" '{"cwd":"'"$VPG63_CWD"'","session_id":"vpgS63"}')
+echo "$OUT" | grep -q "visual-plan gate miss" && fail "no plan file was ever tracked -- there is nothing to judge, expected silence, got: $OUT"
+pass "visual-plan-gate-check.js fails open when no plan file was ever tracked"
+
+echo "=== Test 64: visual-plan-gate-check.js -- an irrelevant tool call touches no state at all (early-return) ==="
+VPG64_PROJECT_POSIX="$WORK/vpg64_project"
+mkdir -p "$VPG64_PROJECT_POSIX"
+(cd "$VPG64_PROJECT_POSIX" && git init -q)
+VPG64_PROJECT=$(win_path "$VPG64_PROJECT_POSIX")
+run_hook visual-plan-gate-check.js "$VPG64_PROJECT" '{"cwd":"'"$VPG64_PROJECT"'","session_id":"vpgS64","tool_name":"Read","tool_input":{"file_path":"README.md"}}' > /dev/null
+[ -d "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" ] && fail "a Read on an unrelated file should never create the state dir at all: $(ls "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" 2>/dev/null)"
+pass "visual-plan-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="

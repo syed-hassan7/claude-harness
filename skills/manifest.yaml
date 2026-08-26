@@ -78,7 +78,7 @@ skills:
     required: false
     trigger: "entering plan mode for non-trivial/multi-file work; user says \"map this out\", \"design a plan for X\"; /visual-plan-local"
     source: "shipped in this repo — visual-plan-local/skills/visual-plan-local/SKILL.md, visual-plan-local/references/, visual-plan-local/template.html"
-    install: "install.sh always copies visual-plan-local/ into the pack (cheap, read-only files), same as onboarding/. No settings.json wiring — it's a skill, not a hook."
+    install: "install.sh always copies visual-plan-local/ into the pack (cheap, read-only files), same as onboarding/. No settings.json wiring — it's a skill, not a hook. Its DEFAULT claim is now backstopped by a real hook — see the memory-hooks entry below and memory/SPEC.md's 'Visual-plan gate memory' section: `visual-plan-gate-check.js` logs a non-blocking MISS when a non-trivial plan exits plan mode with no Artifact publish found, same mechanical-backstop-for-a-prose-gap pattern as review-gate-check.js/design-lane-gate-check.js. Added 2026-08-26 after this exact skip happened for real in-session."
     notes: >
       Added 2026-08-25. Zarak asked to adopt BuilderIO/skills' `visual-plan`
       skill as the default replacement for plan-mode's long-paragraph output.

@@ -32,6 +32,20 @@
 // review-gate-check.js: one screenshot anywhere satisfies every later
 // commit; one UI-file edit anywhere primes every later commit for the
 // check. Never blocks -- same posture as every hook in this pack.
+//
+// Second, independent check added 2026-08-26: a native form control
+// (<select>, <input type="date/time/color/range/month/week">) landing in a
+// UI-file Edit/Write fires immediately (not deferred to a commit event --
+// there's no "give it time to verify" reason to wait, the pattern's
+// presence is a fact the moment it's typed). Different concern from
+// uiTouched/screenshotSeen above: awareness
+// that screenshot verification has a structural blind spot for this whole
+// component class (native popup chrome is OS-rendered, invisible to
+// tab-viewport capture -- confirmed against Chromium issue #170322, a
+// platform limitation, not a Playwright-specific gap), not whether a
+// screenshot happened at all. Own pending slot (pendingNativeControl),
+// separate from the screenshot-MISS's pending -- two independent concerns
+// sharing one slot would let one nudge silently overwrite the other.
 
 const fs = require('fs');
 const path = require('path');
@@ -40,6 +54,14 @@ const lib = require('./_lib');
 const UI_FILE_RE = /\.(tsx|jsx|vue|svelte|css|scss|less|html)$/i;
 const IMAGE_FILE_RE = /\.(png|jpe?g|webp|gif)$/i;
 const SCREENSHOT_MARKER_RE = /\bplaywright\b/i;
+// Case-sensitive: lowercase-only avoids matching a custom capitalized
+// <Select> component (React/Vue convention reserves PascalCase for those).
+const NATIVE_SELECT_RE = /<select[\s/>]/;
+// Case-sensitive too, same reason as NATIVE_SELECT_RE above -- an /i flag
+// here would also match a custom PascalCase <Input> component (shadcn/ui,
+// MUI, Chakra, Radix, Ant Design all ship <Input type="date">), the more
+// common wrapped pattern in practice. Caught at review, not shipped as-is.
+const NATIVE_INPUT_RE = /<input\s+[^>]*type=["'](?:date|time|color|range|month|week)["']/;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune state entries idle > 30 days
 
 function readJSON(p, fallback) {
@@ -78,6 +100,9 @@ function pruneIdle(state, dir, logPath, lockPath) {
       if (state[id] && state[id].pending) {
         expired.push(`EXPIRED | ${lib.nowISO()} | session ${id} | design-lane MISS never surfaced, pruned after 30d idle`);
       }
+      if (state[id] && state[id].pendingNativeControl) {
+        expired.push(`EXPIRED | ${lib.nowISO()} | session ${id} | native-control nudge never surfaced, pruned after 30d idle`);
+      }
       delete state[id];
     }
   }
@@ -105,7 +130,17 @@ function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) 
   const toolInput = input.tool_input || {};
 
   if (toolName === 'Edit' || toolName === 'Write') {
-    if (UI_FILE_RE.test(toolInput.file_path || '')) sessState.uiTouched = true;
+    const filePath = toolInput.file_path || '';
+    if (UI_FILE_RE.test(filePath)) {
+      sessState.uiTouched = true;
+      const addedText = toolName === 'Edit' ? (toolInput.new_string || '') : (toolInput.content || '');
+      if (NATIVE_SELECT_RE.test(addedText) || NATIVE_INPUT_RE.test(addedText)) {
+        sessState.pendingNativeControl = { at: lib.nowISO(), file: filePath };
+        appendLog(dir, logPath, lockPath, [
+          `NATIVE | ${lib.nowISO()} | session ${sessionId} | native form control added in ${filePath} -- screenshot verification has a blind spot for this component class (see rules/design-lane.md anti-patterns)`,
+        ]);
+      }
+    }
     return;
   }
   if (toolName === 'Read') {
@@ -137,15 +172,29 @@ function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) 
 // UserPromptSubmit: surface a pending miss exactly once, then clear it --
 // same one-shot acknowledgment pattern as review-gate-check.js.
 function handleUserPromptSubmit(sessState) {
-  if (!sessState.pending) return null;
-  sessState.pending = null;
+  const blocks = [];
+  if (sessState.pending) {
+    sessState.pending = null;
+    blocks.push(
+      `## Claude Harness -- design-lane gate miss\n\n` +
+      `A commit ran earlier that touched a UI file, with no screenshot/Playwright evidence found in this session. ` +
+      `Logged, not blocking -- rules/design-lane.md's render-before-judging gate applies if UI/visual work is still in flight.`
+    );
+  }
+  if (sessState.pendingNativeControl) {
+    const file = sessState.pendingNativeControl.file || 'a UI file';
+    sessState.pendingNativeControl = null;
+    blocks.push(
+      `## Claude Harness -- native-control blind spot\n\n` +
+      `A native form control (<select>/<input type="date"> etc.) was added in ${file}. ` +
+      `Its OS-rendered popup chrome is invisible to screenshot verification by construction -- see rules/design-lane.md's anti-patterns list. Logged, not blocking.`
+    );
+  }
+  if (!blocks.length) return null;
   return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
-      additionalContext:
-        `## Claude Harness -- design-lane gate miss\n\n` +
-        `A commit ran earlier that touched a UI file, with no screenshot/Playwright evidence found in this session. ` +
-        `Logged, not blocking -- rules/design-lane.md's render-before-judging gate applies if UI/visual work is still in flight.`,
+      additionalContext: blocks.join('\n\n'),
     },
   };
 }
@@ -160,7 +209,7 @@ function main() {
   const { dir, statePath, logPath, lockPath } = paths(base);
 
   const state = readJSON(statePath, {});
-  const sessState = state[sessionId] || { uiTouched: false, screenshotSeen: false, pending: null };
+  const sessState = state[sessionId] || { uiTouched: false, screenshotSeen: false, pending: null, pendingNativeControl: null };
 
   let output = null;
   if (input.tool_name) {

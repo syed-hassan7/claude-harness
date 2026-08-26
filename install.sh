@@ -185,14 +185,15 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
     echo "[claude-harness] memory hooks installed at $PACK_DIR/memory/hooks (not wired into settings.json — see instructions below)"
   fi
   MEMORY_LINE="Memory spec + hooks (session checkpoints — opt-in, installed): \`$PACK_DIR_DISP/memory/SPEC.md\`, \`$PACK_DIR_DISP/memory/hooks/\`"
-  # Unlike the caveman wiring block below, this bucket has grown to 9 hook
+  # Unlike the caveman wiring block below, this bucket has grown to 10 hook
   # files across several sessions (canary-check.js -> review-gate-check.js ->
-  # design-lane-gate-check.js) -- a single-file proxy check (grep for just
-  # one filename) would go stale the moment a new hook is added to this list
-  # without a matching settings.json edit, so every current file is checked.
+  # design-lane-gate-check.js -> visual-plan-gate-check.js) -- a single-file
+  # proxy check (grep for just one filename) would go stale the moment a new
+  # hook is added to this list without a matching settings.json edit, so
+  # every current file is checked.
   MEMORY_HOOKS_ALL_WIRED=1
   if [ -f "$CLAUDE_DIR/settings.json" ]; then
-    for hook_file in memory-init.js memory-recall.js canary-check.js review-gate-check.js design-lane-gate-check.js memory-checkpoint.js memory-architecture.js memory-compact.js memory-flush.js; do
+    for hook_file in memory-init.js memory-recall.js canary-check.js review-gate-check.js design-lane-gate-check.js visual-plan-gate-check.js memory-checkpoint.js memory-architecture.js memory-compact.js memory-flush.js; do
       grep -q "$hook_file" "$CLAUDE_DIR/settings.json" || MEMORY_HOOKS_ALL_WIRED=0
     done
   else
@@ -209,11 +210,13 @@ append to it, don't replace it):
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-recall.js\"", "timeout": 5 }] },
                         { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/canary-check.js\"", "timeout": 5 }] },
                         { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
-                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] }]
+                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] },
+                        { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/visual-plan-gate-check.js\"", "timeout": 5 }] }]
   "PostToolUse":      [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] },
                         { "matcher": "Read|Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-architecture.js\"", "timeout": 5 }] },
                         { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
-                        { "matcher": "Edit|Write|Read|Bash|mcp__playwright.*", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] }]
+                        { "matcher": "Edit|Write|Read|Bash|mcp__playwright.*", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] },
+                        { "matcher": "Edit|Write|ExitPlanMode|Artifact", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/visual-plan-gate-check.js\"", "timeout": 5 }] }]
   "PreCompact":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
   "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-flush.js\"", "timeout": 5 }] }]
 memory-recall.js and memory-architecture.js implement project-architecture
@@ -229,7 +232,14 @@ design-lane-gate-check.js implements the mechanical design-lane gate
 (memory/SPEC.md's "Design-lane gate memory" section) -- same two-registration
 shape, but detection is fully structural (Edit/Write on a UI file, Read on an
 image file, mcp__playwright.* tool calls) rather than a transcript text scan,
-non-blocking. Note each of these UserPromptSubmit registrations is a SEPARATE
+non-blocking; also flags a native form control (<select>, <input type="date">
+etc.) landing in a UI file, independent of the screenshot check.
+visual-plan-gate-check.js implements the mechanical visual-plan gate
+(memory/SPEC.md's "Visual-plan gate memory" section) -- same two-registration
+shape: tracks a Write/Edit to a plan file under <home>/.claude/plans/ and any
+Artifact-tool call per session, and on ExitPlanMode checks whether a
+non-trivial plan published no Artifact companion, non-blocking. Note each of
+these UserPromptSubmit registrations is a SEPARATE
 array entry from caveman's
 own UserPromptSubmit hook below -- Claude Code runs all matching hooks for an
 event, none of them replace each other.
