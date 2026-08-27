@@ -251,8 +251,15 @@ find "$TRIM_ARCHIVE" -name '2020-old-*' | grep -q . && fail "day-old archive fil
 echo "=== Test 15: project archive trim -- count cap (16 recent files -> keep newest 10) ==="
 rm -rf "$TRIM_ARCHIVE"
 mkdir -p "$TRIM_ARCHIVE"
+# Stagger the fixtures' mtimes: trimProjectArchive ranks by mtime, so 15
+# files written inside the same second (the pre-2026-08-27 fixture) left the
+# ordering to readdir(), which made "the oldest one is evicted" a coin flip --
+# this test failed roughly 1 run in 3 on a fast disk. Entry 01 is now the
+# unambiguously oldest.
 for i in $(seq 1 15); do
-  echo "entry $i" > "$TRIM_ARCHIVE/2026-entry-$(printf '%02d' "$i").md"
+  ENTRY="$TRIM_ARCHIVE/2026-entry-$(printf '%02d' "$i").md"
+  echo "entry $i" > "$ENTRY"
+  touch_seconds_ago $(( (16 - i) * 60 )) "$ENTRY"
 done
 echo -e "# Session checkpoint\nscope: project\nrepo: trim_project\nsession_id: sT\nupdated: $(date -u +%Y-%m-%dT%H:%M:%S.000Z)\ngoal: \n" > "$TRIM_PROJECT_POSIX/.claude/session/checkpoint.md"
 run_hook memory-compact.js "$TRIM_PROJECT" '{"cwd":"'"$TRIM_PROJECT"'"}' > /dev/null

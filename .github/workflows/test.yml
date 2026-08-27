@@ -11,7 +11,7 @@ name: test
 on: [push, pull_request]
 
 jobs:
-  memory-and-statusline-tests:
+  hook-and-statusline-tests:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
@@ -21,6 +21,12 @@ jobs:
       - name: memory hooks test suite
         shell: bash
         run: bash memory/hooks/test/run.sh
+      - name: caveman hooks test suite
+        shell: bash
+        run: bash caveman/hooks/test/run.sh
+      - name: onboarding + install.sh test suite
+        shell: bash
+        run: bash onboarding/test/run.sh
       - name: statusline test suite
         shell: bash
         run: bash statusline/test.sh
