@@ -217,12 +217,12 @@ fi
 if [ "$ONBOARD_MODE" -eq 1 ]; then
   echo ""
   echo "[claude-harness] onboarding — three install tiers:"
-  node -e "
-    const steps = JSON.parse(require('fs').readFileSync('$REPO_DIR_DISP/onboarding/steps.json', 'utf8'));
+  node -e '
+    const steps = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     for (const t of steps.orient.tiers) {
-      console.log('  ' + t.label.toUpperCase().padEnd(12) + t.description);
+      console.log("  " + t.label.toUpperCase().padEnd(12) + t.description);
     }
-  "
+  ' "$REPO_DIR_DISP/onboarding/steps.json"
   echo ""
   if [ "$WITH_MEMORY_HOOKS" -eq 0 ]; then
     read -r -p "[claude-harness] Install memory hooks (session checkpoints, project-architecture recall, drift-canary)? Fires on every Edit/Write once wired. [y/N] " ans
@@ -550,8 +550,8 @@ elif [ "$ONBOARD_MODE" -eq 1 ] || [ "$WITH_MEMORY_HOOKS" -eq 1 ] || [ -n "$CAVEM
   echo ""
   node "$PACK_DIR/onboarding/verify.js"
   echo ""
-  node -e "
-    const steps = JSON.parse(require('fs').readFileSync('$REPO_DIR_DISP/onboarding/steps.json', 'utf8'));
-    console.log('[claude-harness] first light: ' + steps.firstLight.instructions);
-  "
+  node -e '
+    const steps = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    console.log("[claude-harness] first light: " + steps.firstLight.instructions);
+  ' "$REPO_DIR_DISP/onboarding/steps.json"
 fi

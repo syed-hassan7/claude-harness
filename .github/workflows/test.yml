@@ -10,6 +10,11 @@ name: test
 # machine that actually dogfoods these hooks.
 on: [push, pull_request]
 
+# Read-only token: this workflow only checks out and runs tests, so it never
+# needs the default write-capable GITHUB_TOKEN a fork PR could aim at.
+permissions:
+  contents: read
+
 jobs:
   memory-and-statusline-tests:
     strategy:

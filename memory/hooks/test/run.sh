@@ -952,6 +952,56 @@ run_hook visual-plan-gate-check.js "$VPG64_PROJECT" '{"cwd":"'"$VPG64_PROJECT"'"
 [ -d "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" ] && fail "a Read on an unrelated file should never create the state dir at all: $(ls "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" 2>/dev/null)"
 pass "visual-plan-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
+echo "=== Test 65: architecture note IDs that escape the notes dir are rejected before they become paths ==="
+# Both the index file and the watch map are repo-tracked -- an id like
+# ../../../.ssh/config would otherwise be path.join()'d into a write target
+# outside <scope>/architecture/notes/.
+TRAVERSAL_JSON=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+const bad = ['../../../.ssh/config', 'a/b', 'x\\\\y', '..', '.hidden'];
+const good = ['auth-flow', 'Auth_Flow.v2', 'a1'];
+console.log(JSON.stringify({
+  badIds: bad.filter((id) => lib.isSafeNoteId(id)),
+  goodIds: good.filter((id) => !lib.isSafeNoteId(id)),
+  badLine: lib.parseArchIndexLine('../../../.ssh/config | proj | tags | summary | notes/x.md'),
+  goodLine: !!lib.parseArchIndexLine('auth-flow | proj | tags | summary | notes/auth-flow.md'),
+}));
+")
+echo "$TRAVERSAL_JSON" | grep -q '"badIds":\[\]' || fail "isSafeNoteId accepted a traversing/unsafe note id: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"goodIds":\[\]' || fail "isSafeNoteId rejected an ordinary note id: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"badLine":null' || fail "parseArchIndexLine kept an index row whose id escapes the notes dir: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"goodLine":true' || fail "parseArchIndexLine dropped a legitimate index row: $TRAVERSAL_JSON"
+pass "note ids that would escape architecture/notes/ are rejected at parse time, ordinary ids still pass"
+
+echo "=== Test 66: watch-map entries with unsafe ids are dropped, safe siblings survive ==="
+WATCH_POSIX="$WORK/watchmap_proj"
+mkdir -p "$WATCH_POSIX/.claude/architecture"
+printf '{"src/app.ts":["auth-flow","../../../.ssh/config"],"src/b.ts":["../evil"]}' \
+  > "$WATCH_POSIX/.claude/architecture/watch-map.json"
+WATCH_MAP_JSON=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+console.log(JSON.stringify(lib.readWatchMap('$(win_path "$WATCH_POSIX")/.claude')));
+")
+echo "$WATCH_MAP_JSON" | grep -q '\.ssh' && fail "readWatchMap passed a traversing id through to the note-path builder: $WATCH_MAP_JSON"
+echo "$WATCH_MAP_JSON" | grep -q '"src/b.ts"' && fail "an entry whose only id was unsafe should drop out entirely: $WATCH_MAP_JSON"
+echo "$WATCH_MAP_JSON" | grep -q 'auth-flow' || fail "readWatchMap dropped a safe id alongside the unsafe one: $WATCH_MAP_JSON"
+pass "readWatchMap keeps safe ids and drops the ones that would escape the notes dir"
+
+echo "=== Test 67: stripSecrets redacts the credential classes this pack's own machine holds ==="
+REDACT_OUT=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+const samples = [
+  'key sk-ant-api03-AAAABBBBCCCCDDDDEEEE',
+  'Authorization: Bearer abcdefghijklmnop0123456789',
+  'token: \"hunter2hunter2\"',
+];
+console.log(samples.map((s) => lib.stripSecrets(s)).join('\n'));
+")
+echo "$REDACT_OUT" | grep -q 'sk-ant-api03' && fail "an Anthropic key survived stripSecrets: $REDACT_OUT"
+echo "$REDACT_OUT" | grep -q 'abcdefghijklmnop' && fail "a bearer token survived stripSecrets: $REDACT_OUT"
+echo "$REDACT_OUT" | grep -q 'hunter2' && fail "a quoted token assignment survived stripSecrets: $REDACT_OUT"
+pass "stripSecrets redacts Anthropic keys, bearer tokens, and quoted token assignments"
+
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true

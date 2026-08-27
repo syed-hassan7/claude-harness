@@ -78,7 +78,12 @@ const SECRET_PATTERNS = [
   /(?:aws)?[_-]?secret[_-]?access[_-]?key\s*[=:]\s*['"]?[A-Za-z0-9/+=]{40}/gi,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
   /ghp_[A-Za-z0-9]{36,}/g,
-  /(?:api[_-]?key|password|secret)\s*[=:]\s*['"][^'"\s]{8,}['"]/gi,
+  // Anthropic keys and OAuth tokens -- the one credential class every session
+  // running this pack demonstrably has on the machine, and the only one the
+  // original pattern set missed.
+  /sk-ant-[A-Za-z0-9_-]{16,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi,
+  /(?:api[_-]?key|password|secret|token)\s*[=:]\s*['"][^'"\s]{8,}['"]/gi,
 ];
 
 function stripSecrets(text) {
@@ -254,6 +259,20 @@ function serializeCheckpoint(cp) {
 // memory-architecture.js. Index line format: "[STALE?] id | project | tags |
 // summary | path", one per note, flat file at <base>/architecture/index.md.
 
+// Note ids are read out of files that live INSIDE a repo (.claude/architecture/
+// index.md, .claude/architecture/watch-map.json), so on any cloned repo they are
+// attacker-controlled input, and every consumer turns an id straight into a
+// path (`<base>/architecture/notes/<id>.md`). Without this gate an id of
+// `../../../../.ssh/config` gets read and injected into the agent's context by
+// memory-recall.js/memory-architecture.js, and rewritten in place by
+// memory-architecture.js's staleness pass -- arbitrary file read and write from
+// nothing worse than `git clone`. Ids are opaque handles, so the allowlist is
+// deliberately narrow: no separators, no dots leading a traversal segment.
+const SAFE_NOTE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function isSafeNoteId(id) {
+  return typeof id === 'string' && SAFE_NOTE_ID_RE.test(id) && !id.includes('..');
+}
+
 function parseArchIndexLine(line) {
   const trimmed = (line || '').trim();
   if (!trimmed) return null;
@@ -262,7 +281,7 @@ function parseArchIndexLine(line) {
   const parts = body.split('|').map((p) => p.trim());
   if (parts.length < 5) return null;
   const [id, project, tags, summary, notePath] = parts;
-  if (!id) return null;
+  if (!isSafeNoteId(id)) return null;
   return { id, project, tags, summary, path: notePath, stale };
 }
 
@@ -312,7 +331,14 @@ function readWatchMap(base) {
   const p = path.join(base, 'architecture', 'watch-map.json');
   try {
     const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+    const safe = {};
+    for (const [rel, ids] of Object.entries(parsed)) {
+      if (!Array.isArray(ids)) continue;
+      const kept = ids.filter(isSafeNoteId);
+      if (kept.length) safe[rel] = kept;
+    }
+    return safe;
   } catch (_) {
     return {};
   }
@@ -422,6 +448,7 @@ module.exports = {
   architectureEntryMatches,
   extractSection,
   readWatchMap,
+  isSafeNoteId,
   flagIndexLineStale,
   gatePaths,
   readGateState,

@@ -124,7 +124,11 @@ function main() {
       }
       if (!sessState.pending && citesPack && !hasName) {
         const matchedFile = PACK_FILES.find((f) => text.toLowerCase().includes(f.toLowerCase())) || 'a pack file';
-        const excerpt = text.replace(/\s+/g, ' ').trim().slice(0, 140);
+        // Redacted before it lands on disk: this excerpt is raw assistant
+        // text, and canary/log.md is the one place in this pack where model
+        // output is persisted verbatim -- a turn that quoted a key would
+        // otherwise write it into a long-lived log file.
+        const excerpt = lib.stripSecrets(text.replace(/\s+/g, ' ').trim()).slice(0, 140);
         sessState.pending = { file: matchedFile, at: lib.nowISO() };
         events.push(`OPEN | ${lib.nowISO()} | session ${sessionId} | cited ${matchedFile}, no name -- "${excerpt}"`);
       }
