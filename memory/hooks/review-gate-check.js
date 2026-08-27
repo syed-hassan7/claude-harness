@@ -4,24 +4,42 @@
 // trigger-gated but not enforced). Design rationale, rejected alternatives,
 // and state shape live in memory/SPEC.md's "Review-gate memory" section --
 // not duplicated here, see design-lane-gate-check.js's header for why.
+//
+// Structural detection, not a transcript text scan (same fix class as
+// design-lane-gate-check.js -- see its header). The original version tested
+// a marker regex against raw transcript text, which Claude Code's own
+// injected agent-listing boilerplate (and the user's own prose mentioning
+// "review-loop") satisfied before any real review ran -- a dead gate on any
+// setup with the coderabbit plugin installed. This version only trusts the
+// tool_name/tool_input of the PostToolUse call that actually fired the hook:
+// a Skill invocation naming one of the review skills, an Agent invocation
+// naming the coderabbit reviewer subagent, or a Bash command that actually
+// runs the coderabbit CLI -- never free text.
 
 const lib = require('./_lib');
 
-const MARKER_RE = /\b(review-loop|security-audit|security-review|security-spec|red-team-desk|coderabbit)\b/i;
+const SKILL_MARKER_RE = /^(review-loop|security-audit|security-review|security-spec|red-team-desk|coderabbit)\b/i;
+const SUBAGENT_MARKER_RE = /coderabbit/i;
+const CLI_MARKER_RE = /\bcoderabbit\s+(review|autofix)\b/i;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune state entries idle > 30 days
 
-// PostToolUse (Bash): scan new transcript text for review-marker evidence,
-// update the sticky reviewSeen flag, and -- if this command matches a git
-// commit with reviewSeen still false -- log a MISS and set pending.
-function handlePostToolUse(input, sessState, transcriptPath, sessionId, dir, logPath, lockPath) {
-  const { lines, newOffset } = lib.readTranscriptSince(transcriptPath, sessState.offset);
-  sessState.offset = newOffset;
-  if (lines.length) {
-    const text = lines.join('\n');
-    if (MARKER_RE.test(text)) sessState.reviewSeen = true;
+// PostToolUse (Bash|Skill|Agent): check whether THIS tool call is itself
+// real review evidence, update the sticky reviewSeen flag, and -- if this is
+// a git commit with reviewSeen still false -- log a MISS and set pending.
+function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) {
+  const toolName = input.tool_name || '';
+  const toolInput = input.tool_input || {};
+
+  if (toolName === 'Skill' && SKILL_MARKER_RE.test(toolInput.skill || '')) {
+    sessState.reviewSeen = true;
+  } else if (toolName === 'Agent' && SUBAGENT_MARKER_RE.test(toolInput.subagent_type || '')) {
+    sessState.reviewSeen = true;
+  } else if (toolName === 'Bash' && CLI_MARKER_RE.test(toolInput.command || '')) {
+    sessState.reviewSeen = true;
   }
 
-  const command = (input.tool_input && input.tool_input.command) || '';
+  if (toolName !== 'Bash') return; // only a Bash call can be the commit trigger
+  const command = toolInput.command || '';
   if (lib.isGitCommitCommand(command) && !sessState.reviewSeen) {
     sessState.pending = { at: lib.nowISO() };
     lib.appendGateLog(dir, logPath, lockPath, [
@@ -51,16 +69,15 @@ function main() {
   const input = lib.readHookInput();
   const cwd = input.cwd || process.cwd();
   const sessionId = input.session_id || 'unknown';
-  const transcriptPath = input.transcript_path || '';
   const { base } = lib.resolveScope(cwd);
   const { dir, statePath, logPath, lockPath } = lib.gatePaths(base, 'review-gate');
 
   const state = lib.readGateState(statePath);
-  const sessState = state[sessionId] || { offset: 0, reviewSeen: false, pending: null };
+  const sessState = state[sessionId] || { reviewSeen: false, pending: null };
 
   let output = null;
   if (input.tool_name) {
-    handlePostToolUse(input, sessState, transcriptPath, sessionId, dir, logPath, lockPath);
+    handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
   } else {
     output = handleUserPromptSubmit(sessState);
   }

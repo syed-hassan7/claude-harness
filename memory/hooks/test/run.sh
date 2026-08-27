@@ -518,10 +518,7 @@ REVGATE_PROJECT_POSIX="$WORK/revgate_project"
 mkdir -p "$REVGATE_PROJECT_POSIX"
 (cd "$REVGATE_PROJECT_POSIX" && git init -q)
 REVGATE_PROJECT=$(win_path "$REVGATE_PROJECT_POSIX")
-REVGATE_TRANSCRIPT_POSIX="$WORK/revgate_transcript.jsonl"
-REVGATE_TRANSCRIPT=$(win_path "$WORK")/revgate_transcript.jsonl
-printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"just an unrelated turn, no review skill mentioned"}]}}' > "$REVGATE_TRANSCRIPT_POSIX"
-run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","transcript_path":"'"$REVGATE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"ls -la"}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","tool_name":"Bash","tool_input":{"command":"ls -la"}}' > /dev/null
 REVGATE_LOG="$REVGATE_PROJECT_POSIX/.claude/review-gate/log.md"
 [ -f "$REVGATE_LOG" ] && grep -q "session revS1" "$REVGATE_LOG" && fail "non-commit Bash call should not log anything: $(cat "$REVGATE_LOG")"
 REVGATE_STATE="$REVGATE_PROJECT/.claude/review-gate/state.json"
@@ -533,7 +530,7 @@ if (s.revS1.pending) { console.error('pending should still be null'); process.ex
 pass "review-gate-check.js does nothing on a non-commit Bash call"
 
 echo "=== Test 35: review-gate-check.js -- commit with no review evidence logs a MISS ==="
-run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","transcript_path":"'"$REVGATE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"git commit -m \"add feature\""}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1","tool_name":"Bash","tool_input":{"command":"git commit -m \"add feature\""}}' > /dev/null
 grep -q "^MISS .*session revS1" "$REVGATE_LOG" || fail "expected a MISS entry for revS1: $(cat "$REVGATE_LOG" 2>/dev/null)"
 node -e "
 const s = JSON.parse(require('fs').readFileSync('$REVGATE_STATE', 'utf8'));
@@ -541,14 +538,29 @@ if (!s.revS1.pending) { console.error('pending should be set after an unreviewed
 "
 pass "review-gate-check.js logs a MISS when a commit runs with no review-loop/security-audit evidence"
 
-echo "=== Test 36: review-gate-check.js -- review-marker evidence anywhere in-session clears the sticky flag, no MISS on commit ==="
-REVGATE_TRANSCRIPT2_POSIX="$WORK/revgate_transcript2.jsonl"
-REVGATE_TRANSCRIPT2=$(win_path "$WORK")/revgate_transcript2.jsonl
-printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Running /review-loop before shipping this."}]}}' > "$REVGATE_TRANSCRIPT2_POSIX"
-run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","transcript_path":"'"$REVGATE_TRANSCRIPT2"'","tool_name":"Bash","tool_input":{"command":"npm test"}}' > /dev/null
-run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","transcript_path":"'"$REVGATE_TRANSCRIPT2"'","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
-grep -q "session revS2" "$REVGATE_LOG" && fail "revS2 ran review-loop first, should never log a MISS: $(cat "$REVGATE_LOG")"
-pass "review-gate-check.js does not flag a commit once review-loop/security-audit evidence appeared earlier in the session"
+echo "=== Test 36: review-gate-check.js -- a real Skill(review-loop) invocation clears the sticky flag, no MISS on commit ==="
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","tool_name":"Skill","tool_input":{"skill":"review-loop"}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS2","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
+grep -q "session revS2" "$REVGATE_LOG" && fail "revS2 ran Skill(review-loop) first, should never log a MISS: $(cat "$REVGATE_LOG")"
+pass "review-gate-check.js does not flag a commit once a real Skill(review-loop) invocation happened earlier in the session"
+
+echo "=== Test 36b: review-gate-check.js -- a real Agent(coderabbit:code-reviewer) invocation clears the sticky flag ==="
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS3","tool_name":"Agent","tool_input":{"subagent_type":"coderabbit:code-reviewer"}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS3","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
+grep -q "session revS3" "$REVGATE_LOG" && fail "revS3 ran Agent(coderabbit:code-reviewer) first, should never log a MISS: $(cat "$REVGATE_LOG")"
+pass "review-gate-check.js does not flag a commit once a real Agent(coderabbit:code-reviewer) invocation happened earlier in the session"
+
+echo "=== Test 36c: review-gate-check.js -- a real coderabbit CLI invocation via Bash clears the sticky flag ==="
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS4","tool_name":"Bash","tool_input":{"command":"coderabbit review --agent"}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS4","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
+grep -q "session revS4" "$REVGATE_LOG" && fail "revS4 ran the coderabbit CLI first, should never log a MISS: $(cat "$REVGATE_LOG")"
+pass "review-gate-check.js does not flag a commit once a real coderabbit CLI invocation happened earlier in the session"
+
+echo "=== Test 36d: review-gate-check.js -- REGRESSION: merely MENTIONING review-loop/coderabbit in text/commands, without a real invocation, must still MISS ==="
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS5","tool_name":"Bash","tool_input":{"command":"echo \"remember to run review-loop and coderabbit later\""}}' > /dev/null
+run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS5","tool_name":"Bash","tool_input":{"command":"git commit -m \"ship it\""}}' > /dev/null
+grep -q "^MISS .*session revS5" "$REVGATE_LOG" || fail "revS5 only ever MENTIONED the markers in a command string, never actually invoked a review tool -- must still MISS: $(cat "$REVGATE_LOG" 2>/dev/null)"
+pass "review-gate-check.js is not satisfied by text merely mentioning review-loop/coderabbit -- only a real invocation counts"
 
 echo "=== Test 37: review-gate-check.js -- UserPromptSubmit surfaces a pending miss exactly once ==="
 OUT=$(run_hook review-gate-check.js "$REVGATE_PROJECT" '{"cwd":"'"$REVGATE_PROJECT"'","session_id":"revS1"}')

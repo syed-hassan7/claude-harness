@@ -11,7 +11,7 @@
 #
 # Drift canary applies to this file — see WORKFLOW.md's "Drift canary" note.
 
-version: "6.2.0"
+version: "6.4.0"
 
 skills:
   # ── Engineering (always on) ────────────────────────────────────────────
@@ -19,8 +19,8 @@ skills:
     role: "Core engineering — YAGNI ladder, root-cause fixes, minimal safe code"
     required: true
     source: "https://github.com/DietrichGebert/ponytail"
-    install: "npm package @dietrichgebert/ponytail, or native Claude Code skill file"
-    pin: "4.8.4"
+    install: "Claude Code marketplace plugin (NOT an npm package -- corrected 2026-08-27, the prior note was wrong/stale). `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` -- both non-interactive CLI commands, no TTY prompt required. install.sh now runs these itself (idempotent, skips if already installed+enabled), same as it does for caveman's hook wiring."
+    pin: "4.8.4 (vetted); 4.9.0 actually installed 2026-08-27 -- pin is the version last security-vetted, NOT an enforced ceiling. `claude plugin install <name>@<marketplace>` has no version-pin flag (confirmed via `claude plugin install --help`), so this line records provenance only -- install.sh always installs whatever the marketplace currently serves as HEAD. Accepted risk for a required:true skill pulled unconditionally from a third-party GitHub-hosted marketplace: re-vet at every check-in, don't treat this field as protection between vets."
     stars: 93764
     vet_date: "2026-08-02"
     notes: >
@@ -36,6 +36,19 @@ skills:
       the POSIX/WSL2 hook path only — the Windows-native hook variant is
       separately guarded per the issue titles, low risk for this repo's
       Git-Bash-on-Windows setup specifically.
+
+      CORRECTED 2026-08-27: an external audit found `required: true` was a
+      lie in practice — install.sh had zero install step for this entry, so
+      the pack's only always-on core-engineering skill contributed nothing
+      at runtime on any machine that ran install.sh. Root cause of the gap:
+      the install note above described an npm package that doesn't exist:
+      real distribution is a Claude Code marketplace plugin (confirmed via
+      direct README fetch), which install.sh could not previously drive
+      without an interactive `/plugin` chat flow. Fixed by using the
+      `claude` CLI's non-interactive `plugin marketplace add`/`plugin
+      install` subcommands instead — verified live, no stdin prompt.
+      install.sh's ponytail step is unconditional (this entry has no opt-in
+      flag, matching `required: true`), unlike memory-hooks/caveman below.
 
   - name: caveman
     role: "Terse prose / token efficiency — default communication style for every session"

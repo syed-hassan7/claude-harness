@@ -54,6 +54,26 @@ const results = [];
   });
 }
 
+// --- ponytail: required:true core engineering skill, distributed as a
+// Claude Code marketplace plugin (not part of this pack's own file tree, so
+// there's nothing under PACK_DIR to check presence of -- the only real
+// signal is whether install.sh's plugin-install step actually landed).
+// Added 2026-08-27 after an external audit found this exact gap: the
+// pre-existing tiers above only check file presence + settings.json
+// wiring, which stayed all-green while ponytail (required:true) was never
+// installed at all -- a verifier that can't detect its own pack's most
+// prominent lie isn't verifying the thing that matters.
+{
+  const enabled = settingsContains('"ponytail@ponytail": true');
+  results.push({
+    tier: 'ponytail',
+    status: enabled ? 'ok' : 'missing',
+    detail: enabled
+      ? 'installed and enabled (Claude Code marketplace plugin)'
+      : 'NOT installed -- required:true but missing. Run: claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail',
+  });
+}
+
 // --- caveman: default-on communication layer ---
 {
   const dirPresent = exists(path.join(PACK_DIR, 'caveman'));

@@ -97,6 +97,60 @@ win_path() {
 }
 REPO_DIR_DISP="$(win_path "$REPO_DIR")"
 
+# review-gate-check.js's PostToolUse matcher changed from "Bash" to
+# "Bash|Skill|Agent" in 6.4.0 -- filename-presence checks (MEMORY_HOOKS_ALL_WIRED
+# below, --check's ANY_WIRED) can't see this, since both only grep for the
+# hook's filename anywhere in settings.json, never the matcher value. That's
+# not cosmetic: 6.4.0 also deleted review-gate-check.js's transcript-scan
+# fallback in favor of fully structural detection, so an install stuck on the
+# stale "Bash"-only matcher doesn't just miss real Skill/Agent review
+# evidence -- every commit after a real review logs a false MISS, because the
+# hook never even sees the Skill/Agent call that would have cleared the flag.
+# Detected via a real JSON parse (not a fragile line-adjacency grep) since
+# `matcher` and the hook's `command` live in the same object but not the same
+# line. Returns 0 (stale, needs re-wiring), 1 (fine -- fresh matcher, or not
+# wired at all, that's MEMORY_HOOKS_ALL_WIRED/ANY_WIRED's job not this one's).
+#
+# Path passed via process.argv, NOT interpolated into the -e script string --
+# an earlier version embedded the path directly in the JS source, which (a)
+# broke on this repo's own path (Git-Bash-style, needed win_path -- fixed
+# first) and (b) would silently mis-parse on any path containing a literal
+# single quote (e.g. a Windows profile named "O'Brien"), since that quote
+# closes the JS string literal early and produces a SyntaxError the
+# surrounding try/catch can't catch (it's a compile-time failure, not a
+# runtime one). Caught in review before either ever shipped as the "final"
+# fix -- same swallow-into-false-negative shape both times, closed by
+# argv-passing instead of string-building a third time.
+#
+# A genuine parse/read error (bad JSON, unreadable file) now exits 2 and
+# prints a diagnostic, rather than silently collapsing into "not stale" the
+# way a bare catch-and-exit-1 would -- so a future failure mode of this kind
+# is visible instead of quietly treated as a pass.
+review_gate_matcher_stale() {
+  local settings="$1" settings_win rc
+  [ -f "$settings" ] || return 1
+  settings_win="$(win_path "$(dirname "$settings")")/$(basename "$settings")"
+  node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const entries = (s.hooks && s.hooks.PostToolUse) || [];
+      const hit = entries.find(e => (e.hooks || []).some(h => (h.command || "").includes("review-gate-check.js")));
+      if (!hit) process.exit(1);
+      const matcher = hit.matcher || "";
+      process.exit(/skill/i.test(matcher) && /agent/i.test(matcher) ? 1 : 0);
+    } catch (e) {
+      process.stderr.write("review_gate_matcher_stale: " + e.message + "\n");
+      process.exit(2);
+    }
+  ' "$settings_win"
+  rc=$?
+  if [ "$rc" -eq 2 ]; then
+    echo "[claude-harness] WARNING: could not check review-gate-check.js's matcher freshness (see error above) -- skipping this check, verify manually if upgrading from before 6.4.0"
+    return 1
+  fi
+  return "$rc"
+}
+
 # --- --check: report-only drift check, exits before any install step runs ---
 if [ "$CHECK_MODE" -eq 1 ]; then
   echo "[claude-harness] --check: diffing installed pack ($PACK_DIR) against source ($REPO_DIR)"
@@ -143,6 +197,10 @@ if [ "$CHECK_MODE" -eq 1 ]; then
           DRIFT=1
         fi
       done
+      if review_gate_matcher_stale "$CLAUDE_DIR/settings.json"; then
+        echo "[claude-harness] STALE MATCHER: review-gate-check.js is wired under the pre-6.4.0 \"Bash\"-only PostToolUse matcher -- re-run ./install.sh and paste the updated hook block (matcher must be \"Bash|Skill|Agent\") or every commit will log a false MISS"
+        DRIFT=1
+      fi
     fi
   fi
   if [ "$DRIFT" -eq 0 ]; then
@@ -189,6 +247,30 @@ MARKER_END="<!-- claude-harness:managed:end -->"
 
 echo "[claude-harness] installing from $REPO_DIR into $CLAUDE_DIR"
 
+# --- 0. ponytail: required:true core engineering skill (YAGNI ladder,
+# root-cause fixes) -- distributed as a Claude Code marketplace plugin, not
+# an npm package (skills/manifest.yaml's install note was wrong/stale until
+# 2026-08-27 -- corrected after an external audit found this step never
+# existed, so the pack's only always-on engineering skill contributed
+# nothing at runtime). Installed via the `claude` CLI's non-interactive
+# plugin subcommands (plugin marketplace add / plugin install), not the
+# interactive /plugin chat flow -- no stdin prompt. Unconditional, no opt-in
+# flag, matching required:true (unlike memory-hooks/caveman below, which are
+# genuinely optional). Idempotent -- skips if already installed+enabled.
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[dry-run] would run: claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail (skipped if already installed+enabled)"
+elif ! command -v claude >/dev/null 2>&1; then
+  echo "[claude-harness] WARNING: 'claude' CLI not on PATH -- cannot install required ponytail plugin. Install manually: claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail"
+elif claude plugin list 2>/dev/null | grep -q 'ponytail@ponytail' && [ -f "$CLAUDE_DIR/settings.json" ] && grep -q '"ponytail@ponytail": *true' "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+  echo "[claude-harness] ponytail already installed and enabled"
+else
+  if claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail; then
+    echo "[claude-harness] ponytail installed and enabled"
+  else
+    echo "[claude-harness] WARNING: ponytail install failed (see error output above) -- install manually: claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail"
+  fi
+fi
+
 # --- 1. Pack files: namespaced, never touch ~/.claude/skills or ~/.claude/memory directly ---
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[dry-run] would sync pack files (rules/, skills/, memory/SPEC.md, memory/templates/, WORKFLOW.md) to $PACK_DIR"
@@ -225,6 +307,10 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
     for hook_file in $MEMORY_HOOK_FILES; do
       grep -q "$hook_file" "$CLAUDE_DIR/settings.json" || MEMORY_HOOKS_ALL_WIRED=0
     done
+    if [ "$MEMORY_HOOKS_ALL_WIRED" -eq 1 ] && review_gate_matcher_stale "$CLAUDE_DIR/settings.json"; then
+      echo "[claude-harness] review-gate-check.js's PostToolUse matcher is stale (pre-6.4.0 \"Bash\"-only) -- reprinting the wiring block so you can update it. Every commit will log a false MISS until the matcher is \"Bash|Skill|Agent\"."
+      MEMORY_HOOKS_ALL_WIRED=0
+    fi
   else
     MEMORY_HOOKS_ALL_WIRED=0
   fi
@@ -243,7 +329,7 @@ append to it, don't replace it):
                         { "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/visual-plan-gate-check.js\"", "timeout": 5 }] }]
   "PostToolUse":      [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-checkpoint.js\"", "timeout": 5 }] },
                         { "matcher": "Read|Edit|Write", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-architecture.js\"", "timeout": 5 }] },
-                        { "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
+                        { "matcher": "Bash|Skill|Agent", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/review-gate-check.js\"", "timeout": 5 }] },
                         { "matcher": "Edit|Write|Read|Bash|mcp__playwright.*", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/design-lane-gate-check.js\"", "timeout": 5 }] },
                         { "matcher": "Edit|Write|ExitPlanMode|Artifact", "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/visual-plan-gate-check.js\"", "timeout": 5 }] }]
   "PreCompact":       [{ "hooks": [{ "type": "command", "command": "node \"$PACK_DIR_DISP/memory/hooks/memory-compact.js\"", "timeout": 5 }] }]
@@ -255,11 +341,14 @@ Read/Edit/Write. canary-check.js implements the mechanical drift-canary miss
 detector (memory/SPEC.md's "Canary-drift memory" section) -- checks pack-file
 citation + name co-occurrence on every prompt, non-blocking. review-gate-check.js
 implements the mechanical review-gate (memory/SPEC.md's "Review-gate memory"
-section) -- registered TWICE (PostToolUse:Bash to detect a commit, UserPromptSubmit
-to surface a miss on the next turn), same file for both, non-blocking.
+section) -- registered TWICE (PostToolUse:Bash|Skill|Agent to detect a commit
+and real review evidence structurally -- a Skill/Agent call naming a review
+tool, or a Bash command actually running the coderabbit CLI, never transcript
+text -- UserPromptSubmit to surface a miss on the next turn), same file for
+both, non-blocking.
 design-lane-gate-check.js implements the mechanical design-lane gate
 (memory/SPEC.md's "Design-lane gate memory" section) -- same two-registration
-shape, but detection is fully structural (Edit/Write on a UI file, Read on an
+shape and same fully-structural detection (Edit/Write on a UI file, Read on an
 image file, mcp__playwright.* tool calls) rather than a transcript text scan,
 non-blocking; also flags a native form control (<select>, <input type="date">
 etc.) landing in a UI file, independent of the screenshot check.

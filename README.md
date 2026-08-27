@@ -71,7 +71,7 @@ No step is mechanically blocked. Skip what doesn't apply, revisit what needs it,
 
 ## 04 What's new
 
-**6.2.0** — a cross-repo memory research pass found lessons had no way to graduate out of their own index, silently degrading with use instead of improving; a watermark-based promotion nudge and a Stage 1 episodic task log close it. **6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
+**6.4.0** — an external audit found `review-gate-check.js` was a dead gate (transcript text-scan satisfied by Claude Code's own boilerplate) and `caveman-mode-tracker.js` silently killed caveman mode on any *mention* of the override phrase, even quoted/negated; both fixed structurally, plus `ponytail` (`required: true`) actually gets installed by `install.sh` now instead of being a manifest-only claim. **6.3.0** — the harness audited its own token spend and found a shipped-but-never-wired hook; all 4 gate hooks consolidated onto shared scaffolding. **6.2.0** — a cross-repo memory research pass found lessons had no way to graduate out of their own index, silently degrading with use instead of improving; a watermark-based promotion nudge and a Stage 1 episodic task log close it. **6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## 05 Four things that make this different
 
