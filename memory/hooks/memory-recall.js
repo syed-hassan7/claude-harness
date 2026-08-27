@@ -26,7 +26,7 @@ function main() {
   const promptText = input.prompt || '';
   if (!promptText.trim()) return;
 
-  const { scope, base } = lib.resolveScope(cwd);
+  const { scope, base } = lib.resolveScope(cwd, input.session_id);
   const homeBase = path.join(lib.homeDir(), '.claude');
 
   // Global index is pooled in BOTH scopes -- a question about another
@@ -78,7 +78,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  // Fail open: a broken recall lookup must never block the user's prompt.
+} catch (err) {
+  // Fail open: a broken recall lookup must never block the user's prompt --
+  // but silently recalling nothing, forever, is the failure this records.
+  lib.recordHookError(err, 'memory-recall failed');
 }
 process.exit(0);

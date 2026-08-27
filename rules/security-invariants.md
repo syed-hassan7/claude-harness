@@ -2,7 +2,11 @@
 
 These rules govern the agent on **every session, every surface** it actually runs on. They are **not** profile-gated, not rigor-gated, not optional, and do not depend on any phase or mode. Today that means Claude Code only — wired via the `CLAUDE.md` pointer block. The design intent is broader (this file written so it *can* be copied verbatim into another adapter's always-applied context — `AGENTS.md`, `.cursor/rules/security.mdc`, etc.), but no root `AGENTS.md` or `.cursor/` adapter actually ships in this repo yet (see README.md's intro) — don't assume Cursor/Codex enforcement exists until one does.
 
-Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) blocks writes matching secret patterns. Rules below are the full contract; the hook enforces the subset it can check mechanically.
+Mechanical backstop: **`security/hooks/secret-guard.js`** — a `PreToolUse` hook on `Edit|Write` that blocks a write whose content matches a secret literal (exit 2). Installed unconditionally by `install.sh` to `~/.claude/hooks/secret-guard.js`. Rules below are the full contract; the hook enforces the subset it can check mechanically — and *only* write content: it cannot see a `Read` of a populated `.env`, a Bash `cat`, a `git add`, or a secret pasted into chat. Those halves are prose-only, deliberately and stated (see "How this is enforced" at the bottom).
+
+**Verify it rather than assume it: `node ~/.claude/claude-harness/onboarding/verify.js`.** The `secret-guard` tier proves the file is present, wired into `settings.json`, and actually blocking (it runs the hook against a secret literal and asserts exit 2) — and exits nonzero if not.
+
+> **Corrected 2026-08-27, and worth stating plainly because the failure mode was invisible.** This line used to describe `secret-guard.js` as "the one hook Claude Harness v4 keeps." It was: the file existed *only* as an untracked leftover in one developer's `~/.claude/hooks/`, dated Jun 20, inherited from the retired v4 harness. It was not in this repo, not installed by `install.sh`, and not checked by `onboarding/verify.js` — so every fresh install of this pack shipped the paragraph above claiming a mechanical secret backstop, and none of the hook. Structurally identical to `ponytail` being `required: true` and never installed (external audit finding #11), with worse stakes. Now vendored, installed, and verified.
 
 *Drift canary applies to this file — see `WORKFLOW.md`'s "Drift canary" note. Exception: the Auto-Clarity carve-out already pulls security warnings out of caveman mode, and the canary must not delay or dilute a live warning — name Zarak in the same breath, never instead of the warning.*
 
@@ -42,6 +46,7 @@ Mechanical backstop: `secret-guard.js` (the one hook Claude Harness v4 keeps) bl
 ## Enforcement model
 
 1. **Rules** (this file) — loaded into every agent's always-applied context, every session, regardless of task type.
-2. **Hooks** — `secret-guard.js` mechanically blocks writes matching secret file patterns as a backstop; rules cover everything a static pattern match can't catch (reading, echoing, scope-widening, auth logic).
+2. **Hooks** — `security/hooks/secret-guard.js` mechanically blocks writes matching secret file patterns as a backstop; rules cover everything a static pattern match can't catch (reading, echoing, scope-widening, auth logic).
+3. **Proof the hook is alive** — `onboarding/verify.js` (`secret-guard` tier) and `onboarding/test/red-demos.sh`, which deliberately breaks the guard three ways (absent, present-but-unwired, present-but-neutered) and asserts the verifier reports each. A backstop nobody has watched fail is a backstop nobody has watched work.
 
 "Tier 0" in the headings above is a naming holdover, not an active hierarchy — no tier system in v5, one always-on invariant set, full stop.

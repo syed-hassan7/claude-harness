@@ -8,29 +8,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { getDefaultMode } = require('./caveman-config');
+const { getDefaultMode, getFlagPath, writeFlag, clearFlag, INDEPENDENT_MODES, warn } = require('./caveman-config');
 
-const claudeDir = path.join(os.homedir(), '.claude');
-const flagPath = path.join(claudeDir, '.caveman-active');
-const settingsPath = path.join(claudeDir, 'settings.json');
+const settingsPath = path.join(path.dirname(getFlagPath()), 'settings.json');
 
 const mode = getDefaultMode();
 
 // "off" mode — skip activation entirely, don't write flag or emit rules
 if (mode === 'off') {
-  try { fs.unlinkSync(flagPath); } catch (e) {}
+  clearFlag(); // records its own diagnostic on a real failure -- see caveman-config.js
   process.stdout.write('OK');
   process.exit(0);
 }
 
-// 1. Write flag file
-try {
-  fs.mkdirSync(path.dirname(flagPath), { recursive: true });
-  fs.writeFileSync(flagPath, mode);
-} catch (e) {
-  // Silent fail -- flag is best-effort, don't block the hook
-}
+// 1. Write flag file -- records its own diagnostic on a real failure, never blocking.
+writeFlag(mode);
 
 // 2. Emit full caveman ruleset, filtered to the active intensity level.
 //    The old 2-sentence summary was too weak — models drifted back to verbose
@@ -40,10 +32,8 @@ try {
 //    Reads SKILL.md at runtime so edits to the source of truth propagate
 //    automatically — no hardcoded duplication to go stale.
 
-// Modes that have their own independent skill files — not caveman intensity levels.
+// Modes with their own independent skill files — not caveman intensity levels.
 // For these, emit a short activation line; the skill itself handles behavior.
-const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
-
 if (INDEPENDENT_MODES.has(mode)) {
   process.stdout.write('CAVEMAN MODE ACTIVE — level: ' + mode + '. Behavior defined by /caveman-' + mode + ' skill.');
   process.exit(0);
@@ -60,7 +50,12 @@ try {
   skillContent = fs.readFileSync(
     path.join(__dirname, '..', 'skills', 'caveman', 'SKILL.md'), 'utf8'
   );
-} catch (e) { /* standalone install — will use fallback below */ }
+} catch (e) {
+  // A missing SKILL.md is the expected standalone-install case (fallback rules
+  // below). An unreadable one silently downgrades every session to the reduced
+  // ruleset, which is not something the user would otherwise notice.
+  if (e.code !== 'ENOENT') warn(`cannot read SKILL.md (${e.code || e.message}) -- using fallback ruleset`);
+}
 
 let output;
 
@@ -142,7 +137,10 @@ try {
       "Proactively offer to set this up for the user on first interaction.";
   }
 } catch (e) {
-  // Silent fail — don't block session start over statusline detection
+  // Don't block session start over statusline detection. A malformed
+  // settings.json lands here, and the nudge it suppresses is the only thing
+  // that would have told the user their statusline isn't wired up.
+  warn(`cannot check statusline config in ${settingsPath} (${e.message}) -- skipping setup nudge`);
 }
 
 process.stdout.write(output);

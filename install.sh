@@ -97,58 +97,44 @@ win_path() {
 }
 REPO_DIR_DISP="$(win_path "$REPO_DIR")"
 
-# review-gate-check.js's PostToolUse matcher changed from "Bash" to
-# "Bash|Skill|Agent" in 6.4.0 -- filename-presence checks (MEMORY_HOOKS_ALL_WIRED
-# below, --check's ANY_WIRED) can't see this, since both only grep for the
-# hook's filename anywhere in settings.json, never the matcher value. That's
-# not cosmetic: 6.4.0 also deleted review-gate-check.js's transcript-scan
-# fallback in favor of fully structural detection, so an install stuck on the
-# stale "Bash"-only matcher doesn't just miss real Skill/Agent review
-# evidence -- every commit after a real review logs a false MISS, because the
-# hook never even sees the Skill/Agent call that would have cleared the flag.
-# Detected via a real JSON parse (not a fragile line-adjacency grep) since
-# `matcher` and the hook's `command` live in the same object but not the same
-# line. Returns 0 (stale, needs re-wiring), 1 (fine -- fresh matcher, or not
-# wired at all, that's MEMORY_HOOKS_ALL_WIRED/ANY_WIRED's job not this one's).
+# Wiring drift check, delegated to onboarding/verify.js --check-wiring.
 #
-# Path passed via process.argv, NOT interpolated into the -e script string --
-# an earlier version embedded the path directly in the JS source, which (a)
-# broke on this repo's own path (Git-Bash-style, needed win_path -- fixed
-# first) and (b) would silently mis-parse on any path containing a literal
-# single quote (e.g. a Windows profile named "O'Brien"), since that quote
-# closes the JS string literal early and produces a SyntaxError the
-# surrounding try/catch can't catch (it's a compile-time failure, not a
-# runtime one). Caught in review before either ever shipped as the "final"
-# fix -- same swallow-into-false-negative shape both times, closed by
-# argv-passing instead of string-building a third time.
+# This used to be a bash function with an embedded `node -e` that checked ONE
+# hook's matcher (review-gate-check.js, whose PostToolUse matcher changed from
+# "Bash" to "Bash|Skill|Agent" in 6.4.0). That was the right fix for the wrong
+# scope: filename-presence checks can't see a matcher value at all, so EVERY
+# hook was exposed to the same class of silent staleness, not just that one.
+# 6.5.0 moves the whole check into verify.js, which owns the expected-wiring
+# table, parses settings.json properly, and additionally catches a settings.json
+# entry pointing at a hook file that no longer exists on disk.
 #
-# A genuine parse/read error (bad JSON, unreadable file) now exits 2 and
-# prints a diagnostic, rather than silently collapsing into "not stale" the
-# way a bare catch-and-exit-1 would -- so a future failure mode of this kind
-# is visible instead of quietly treated as a pass.
-review_gate_matcher_stale() {
-  local settings="$1" settings_win rc
+# Kept from the old implementation, because both were real bugs found in review:
+#   - the path goes to verify.js as ARGV/env, never interpolated into a JS
+#     source string (an embedded path breaks on a Windows profile like
+#     "O'Brien" -- a compile-time SyntaxError no try/catch can swallow), and
+#   - a genuine read/parse failure is reported loudly instead of collapsing
+#     into "not stale", which would silently read as a pass.
+#
+# Returns 0 = stale/broken wiring (caller should reprint the block), 1 = fine.
+harness_wiring_stale() {
+  local settings="$1" rc
   [ -f "$settings" ] || return 1
-  settings_win="$(win_path "$(dirname "$settings")")/$(basename "$settings")"
-  node -e '
-    try {
-      const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-      const entries = (s.hooks && s.hooks.PostToolUse) || [];
-      const hit = entries.find(e => (e.hooks || []).some(h => (h.command || "").includes("review-gate-check.js")));
-      if (!hit) process.exit(1);
-      const matcher = hit.matcher || "";
-      process.exit(/skill/i.test(matcher) && /agent/i.test(matcher) ? 1 : 0);
-    } catch (e) {
-      process.stderr.write("review_gate_matcher_stale: " + e.message + "\n");
-      process.exit(2);
-    }
-  ' "$settings_win"
+  CLAUDE_HARNESS_TARGET="$(win_path "$CLAUDE_DIR")"     node "$REPO_DIR/onboarding/verify.js" --check-wiring > /dev/null 2>&1
   rc=$?
-  if [ "$rc" -eq 2 ]; then
-    echo "[claude-harness] WARNING: could not check review-gate-check.js's matcher freshness (see error above) -- skipping this check, verify manually if upgrading from before 6.4.0"
-    return 1
-  fi
-  return "$rc"
+  # NOTE the polarity flip, which is easy to get backwards and was, once:
+  # verify.js follows the usual CLI convention (exit 0 = healthy), while this
+  # function's callers read 0 as "stale, reprint the block". A straight
+  # `return "$rc"` therefore inverts the meaning and reprints the wiring block
+  # on every healthy install. Caught by running --check against a known-green
+  # install and seeing it claim stale wiring.
+  case "$rc" in
+    0) return 1 ;;  # verify.js: wiring healthy  -> not stale
+    1) return 0 ;;  # verify.js: wiring problems -> stale
+    *)
+      echo "[claude-harness] WARNING: could not check hook wiring freshness (verify.js exited $rc) -- skipping this check, verify manually with: node onboarding/verify.js"
+      return 1
+      ;;
+  esac
 }
 
 # --- --check: report-only drift check, exits before any install step runs ---
@@ -197,8 +183,8 @@ if [ "$CHECK_MODE" -eq 1 ]; then
           DRIFT=1
         fi
       done
-      if review_gate_matcher_stale "$CLAUDE_DIR/settings.json"; then
-        echo "[claude-harness] STALE MATCHER: review-gate-check.js is wired under the pre-6.4.0 \"Bash\"-only PostToolUse matcher -- re-run ./install.sh and paste the updated hook block (matcher must be \"Bash|Skill|Agent\") or every commit will log a false MISS"
+      if harness_wiring_stale "$CLAUDE_DIR/settings.json"; then
+        echo "[claude-harness] STALE/BROKEN WIRING: at least one hook is unwired, on an out-of-date matcher, or points at a missing file -- run: node onboarding/verify.js   (then re-run ./install.sh and paste the updated hook block)"
         DRIFT=1
       fi
     fi
@@ -217,12 +203,12 @@ fi
 if [ "$ONBOARD_MODE" -eq 1 ]; then
   echo ""
   echo "[claude-harness] onboarding — three install tiers:"
-  node -e "
-    const steps = JSON.parse(require('fs').readFileSync('$REPO_DIR_DISP/onboarding/steps.json', 'utf8'));
+  node -e '
+    const steps = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     for (const t of steps.orient.tiers) {
-      console.log('  ' + t.label.toUpperCase().padEnd(12) + t.description);
+      console.log("  " + t.label.toUpperCase().padEnd(12) + t.description);
     }
-  "
+  ' "$REPO_DIR_DISP/onboarding/steps.json"
   echo ""
   if [ "$WITH_MEMORY_HOOKS" -eq 0 ]; then
     read -r -p "[claude-harness] Install memory hooks (session checkpoints, project-architecture recall, drift-canary)? Fires on every Edit/Write once wired. [y/N] " ans
@@ -307,8 +293,8 @@ if [ "$WITH_MEMORY_HOOKS" -eq 1 ]; then
     for hook_file in $MEMORY_HOOK_FILES; do
       grep -q "$hook_file" "$CLAUDE_DIR/settings.json" || MEMORY_HOOKS_ALL_WIRED=0
     done
-    if [ "$MEMORY_HOOKS_ALL_WIRED" -eq 1 ] && review_gate_matcher_stale "$CLAUDE_DIR/settings.json"; then
-      echo "[claude-harness] review-gate-check.js's PostToolUse matcher is stale (pre-6.4.0 \"Bash\"-only) -- reprinting the wiring block so you can update it. Every commit will log a false MISS until the matcher is \"Bash|Skill|Agent\"."
+    if [ "$MEMORY_HOOKS_ALL_WIRED" -eq 1 ] && harness_wiring_stale "$CLAUDE_DIR/settings.json"; then
+      echo "[claude-harness] hook wiring is stale or broken (out-of-date matcher, or a hook pointing at a missing file) -- reprinting the wiring block so you can update it. Run: node onboarding/verify.js  for the specific rows."
       MEMORY_HOOKS_ALL_WIRED=0
     fi
   else
@@ -431,6 +417,41 @@ else
   echo "[claude-harness] visual-plan-local synced to $PACK_DIR/visual-plan-local"
 fi
 
+# --- 1e. security/: the Tier 0 secret guard. ALWAYS installed, no flag --
+# rules/security-invariants.md:5 designates secret-guard.js the single
+# mechanical backstop for all of Tier 0, with no opt-out, so it must not be
+# opt-in here either.
+#
+# Until 2026-08-27 this file was not in this repo at all: it survived only as an
+# untracked leftover in one developer's ~/.claude/hooks/ from the retired v4
+# harness. Every fresh install therefore shipped the RULE claiming a mechanical
+# secret backstop and none of the hook -- structurally the same defect as
+# `ponytail` being required:true and never installed. Copied to
+# $CLAUDE_DIR/hooks/ (NOT under $PACK_DIR) deliberately: that is the path
+# existing installs' PreToolUse block already points at, so nobody has to
+# re-paste wiring to pick this up.
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "[dry-run] would sync security/ to $PACK_DIR/security and install secret-guard.js to $CLAUDE_DIR/hooks/"
+else
+  rm -rf "$PACK_DIR/security"
+  cp -r "$REPO_DIR/security" "$PACK_DIR/security"
+  mkdir -p "$CLAUDE_DIR/hooks"
+  cp "$REPO_DIR/security/hooks/secret-guard.js" "$CLAUDE_DIR/hooks/secret-guard.js"
+  echo "[claude-harness] secret-guard.js installed to $CLAUDE_DIR/hooks/secret-guard.js (Tier 0, always on)"
+fi
+
+if [ -f "$CLAUDE_DIR/settings.json" ] && grep -q 'secret-guard.js' "$CLAUDE_DIR/settings.json"; then
+  echo "[claude-harness] secret-guard already wired in settings.json"
+else
+  CLAUDE_DIR_DISP="$(win_path "$CLAUDE_DIR")"
+  cat <<EOF
+[claude-harness] Add this to ~/.claude/settings.json under "hooks" (MERGE):
+
+  "PreToolUse": [{ "matcher": "Edit|Write", "hooks": [{ "type": "command", "command": "node \"$CLAUDE_DIR_DISP/hooks/secret-guard.js\"", "timeout": 5 }] }]
+
+EOF
+fi
+
 PACK_DIR_DISP_PRE="$(win_path "$PACK_DIR")"
 if [ -f "$CLAUDE_DIR/settings.json" ] && grep -q 'caveman-activate.js' "$CLAUDE_DIR/settings.json"; then
   echo "[claude-harness] caveman hooks already wired in settings.json"
@@ -548,10 +569,15 @@ if [ "$DRY_RUN" -eq 1 ]; then
   fi
 elif [ "$ONBOARD_MODE" -eq 1 ] || [ "$WITH_MEMORY_HOOKS" -eq 1 ] || [ -n "$CAVEMAN_SEED_MODE" ]; then
   echo ""
-  node "$PACK_DIR/onboarding/verify.js"
+  # `|| true`: verify.js exits nonzero on an unmet hard claim (missing/unwired
+  # secret-guard, missing ponytail) so scripts can branch on it -- but here it
+  # is a REPORT printed after install.sh has already told the user what to
+  # paste. A first run legitimately ends with wiring not yet pasted, and
+  # failing the whole install for that (under `set -e`) is wrong. Read the rows.
+  node "$PACK_DIR/onboarding/verify.js" || true
   echo ""
-  node -e "
-    const steps = JSON.parse(require('fs').readFileSync('$REPO_DIR_DISP/onboarding/steps.json', 'utf8'));
-    console.log('[claude-harness] first light: ' + steps.firstLight.instructions);
-  "
+  node -e '
+    const steps = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    console.log("[claude-harness] first light: " + steps.firstLight.instructions);
+  ' "$REPO_DIR_DISP/onboarding/steps.json"
 fi

@@ -9,16 +9,7 @@
 // as context on every single prompt (unlike most hook events), so a cheap
 // per-turn reminder here is the anchor that actually survives session length.
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { getDefaultMode } = require('./caveman-config');
-
-const flagPath = path.join(os.homedir(), '.claude', '.caveman-active');
-
-// One-shot skill invocations, not persistent chat-style levels — no chat
-// reinforcement reminder applies to these.
-const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
+const { getDefaultMode, writeFlag, clearFlag, readFlag, INDEPENDENT_MODES, warn } = require('./caveman-config');
 
 // Deactivation must be a real directive, not a quoted mention or a negated
 // reference to the phrase -- a bare substring test over the whole prompt
@@ -73,6 +64,10 @@ function isRealDeactivation(prompt) {
   return false;
 }
 
+// clearFlag/writeFlag/readFlag are caveman-config.js's shared helpers,
+// imported above -- each records its own diagnostic on a real failure (see
+// that file), so a bare call here is enough; no local wrapper needed.
+
 let input = '';
 process.stdin.on('data', chunk => { input += chunk; });
 process.stdin.on('end', () => {
@@ -104,21 +99,19 @@ process.stdin.on('end', () => {
       }
 
       if (mode && mode !== 'off') {
-        fs.mkdirSync(path.dirname(flagPath), { recursive: true });
-        fs.writeFileSync(flagPath, mode);
+        writeFlag(mode);
       } else if (mode === 'off') {
-        try { fs.unlinkSync(flagPath); } catch (e) {}
+        clearFlag();
       }
     }
 
     // Detect deactivation -- see isRealDeactivation's header comment above.
     if (isRealDeactivation(prompt)) {
-      try { fs.unlinkSync(flagPath); } catch (e) {}
+      clearFlag();
     }
 
     // Per-turn reinforcement (see header comment for why this exists).
-    let activeMode = '';
-    try { activeMode = fs.readFileSync(flagPath, 'utf8').trim(); } catch (e) {}
+    const activeMode = readFlag(); // records its own diagnostic on a real failure
 
     if (activeMode && activeMode !== 'off' && !INDEPENDENT_MODES.has(activeMode)) {
       process.stdout.write(
@@ -128,6 +121,10 @@ process.stdin.on('end', () => {
       );
     }
   } catch (e) {
-    // Silent fail
+    // Fail open: never block a prompt. Recorded on stderr because this catch
+    // also covers a JSON.parse of the hook payload -- if that shape ever
+    // changes, mode switching and deactivation both stop working, with the
+    // stale flag file making it look like caveman is still tracking normally.
+    warn(`prompt hook failed (${e.message}) -- mode tracking skipped for this turn`);
   }
 });

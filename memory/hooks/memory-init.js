@@ -19,11 +19,33 @@ const LESSONS_INDEX_CAP_BYTES = 8000; // pragmatic cap, see memory/SPEC.md's
 const PROJECT_ARCH_CAP_BYTES = 8000;
 const GLOBAL_ARCH_CAP_BYTES = 2000;
 
+// Reads an index file, truncating to capBytes with a loud notice (mined from
+// NousResearch/hermes-agent's fail-on-overflow memory tool, 2026-08-11) --
+// say what got cut and how much, don't just point at the file and let the
+// agent discover the gap.
+function readIndexCapped(idxPath, capBytes) {
+  let idx = fs.readFileSync(idxPath, 'utf8');
+  if (Buffer.byteLength(idx, 'utf8') > capBytes) {
+    const kept = idx.slice(0, capBytes);
+    const droppedLines = idx
+      .slice(capBytes)
+      .split('\n')
+      .filter((l) => l.trim().length).length;
+    idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${idxPath}`;
+  }
+  return idx;
+}
+
+// How far back the hook-error rollup below looks. Long enough that a failure
+// which only fires on PreCompact or SessionEnd is still visible next session,
+// short enough that a fixed problem stops being reported.
+const HOOK_ERROR_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 function main() {
   const input = lib.readHookInput();
   const cwd = input.cwd || process.cwd();
   const sessionId = input.session_id || null;
-  const { scope, base } = lib.resolveScope(cwd);
+  const { scope, base } = lib.resolveScope(cwd, sessionId);
 
   const sessionDir = path.join(base, 'session');
   const archiveDir = path.join(sessionDir, 'archive');
@@ -41,6 +63,34 @@ function main() {
     const raw = fs.readFileSync(cpPath, 'utf8');
     parts.push('## Claude Harness — previous session checkpoint\n\n' + raw.trim());
 
+    // Empty-`goal` nudge. `goal`/`next` are agent-written by design (see
+    // _lib.js's header: a PostToolUse hook only sees tool_input, never
+    // conversation content, so it cannot infer intent) -- and in practice they
+    // go unwritten. WORKFLOW.md's Understand section predicts this exact
+    // failure in its own text, and the 2026-08-27 external audit then found a
+    // real injected checkpoint with `goal:` blank and nothing but two
+    // filenames under `files:` (finding #2). The rule existed with zero
+    // backstop, which is the criteria for mechanizing.
+    //
+    // Deliberately surfaced HERE rather than as a new nudge hook: this is the
+    // one moment the agent is looking straight at the thin checkpoint and
+    // establishing what the session is about, it reuses a read that already
+    // happens, and it needs no new settings.json wiring (an upgrade cost this
+    // pack has already paid twice). It cannot retroactively fill the previous
+    // session's goal -- nothing can -- it breaks the habit loop that produced
+    // the empty field.
+    const prev = lib.parseCheckpoint(raw);
+    if (!String(prev.goal || '').trim()) {
+      parts.push(
+        '## Claude Harness — checkpoint had no `goal`\n\n' +
+          'The checkpoint above was written with an empty `goal:` field, so it cannot answer ' +
+          '"what were we doing" — only which files were touched. `goal`/`next` are never ' +
+          'hook-written (see `memory/SPEC.md`); the agent edits them directly. Write ' +
+          `\`goal:\` into \`${cpPath}\` as soon as this session's objective is clear, and ` +
+          '`next:` before it ends.'
+      );
+    }
+
     if (scope === 'global') {
       const cp = lib.parseCheckpoint(raw);
       if (cp.session_id && sessionId && cp.session_id !== sessionId) {
@@ -53,9 +103,10 @@ function main() {
         try {
           fs.copyFileSync(cpPath, path.join(archiveDir, `${ts}.md`));
           fs.unlinkSync(cpPath);
-        } catch (_) {
+        } catch (err) {
           /* best-effort rotation — a missed rotation just means one stale
              read next session, not data loss */
+          lib.recordHookError(err, `rotating ${cpPath} into ${archiveDir}`);
         }
       }
     }
@@ -74,19 +125,8 @@ function main() {
   }
 
   if (fs.existsSync(lessonsIndexPath)) {
-    let idx = fs.readFileSync(lessonsIndexPath, 'utf8');
+    const idx = readIndexCapped(lessonsIndexPath, LESSONS_INDEX_CAP_BYTES);
     const lessonsNonEmpty = idx.trim().length > 0;
-    if (Buffer.byteLength(idx, 'utf8') > LESSONS_INDEX_CAP_BYTES) {
-      const kept = idx.slice(0, LESSONS_INDEX_CAP_BYTES);
-      const droppedLines = idx
-        .slice(LESSONS_INDEX_CAP_BYTES)
-        .split('\n')
-        .filter((l) => l.trim().length).length;
-      // Loud, not silent (mined from NousResearch/hermes-agent's fail-on-
-      // overflow memory tool, 2026-08-11) — say what got cut and how much,
-      // don't just point at the file and let the agent discover the gap.
-      idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${lessonsIndexPath}`;
-    }
     parts.push('## Claude Harness — lessons index\n\n' + idx.trim());
 
     // Lesson-promotion review nudge (memory/SPEC.md "Lesson-promotion memory").
@@ -103,9 +143,10 @@ function main() {
           try {
             const state = JSON.parse(fs.readFileSync(promotionStatePath, 'utf8'));
             lastReviewedAt = state && typeof state.lastReviewedAt === 'string' ? state.lastReviewedAt : null;
-          } catch (_) {
+          } catch (err) {
             /* malformed state file -- treat as never-reviewed (fail toward
                nudging, not toward silence), never block SessionStart over it */
+            lib.recordHookError(err, `malformed ${promotionStatePath}`);
           }
         }
         // NaN-safe by construction: Date.parse of a missing/malformed watermark
@@ -125,7 +166,8 @@ function main() {
             'ritual and memory/SPEC.md\'s "Lesson-promotion memory" section.';
           parts.push('## Claude Harness — lesson promotion review\n\n' + msg);
         }
-      } catch (_) {
+      } catch (err) {
+        lib.recordHookError(err, 'lesson-promotion review nudge');
         // A transient stat/read failure here (e.g. the index file vanishing
         // between the readFileSync above and this statSync -- external
         // delete, AV scan, a sync-engine lock) must never abort main(): the
@@ -143,15 +185,7 @@ function main() {
   // compact one-line-per-note index so the agent knows what exists.
   function injectArchIndex(label, idxPath, capBytes) {
     if (!fs.existsSync(idxPath)) return;
-    let idx = fs.readFileSync(idxPath, 'utf8');
-    if (Buffer.byteLength(idx, 'utf8') > capBytes) {
-      const kept = idx.slice(0, capBytes);
-      const droppedLines = idx
-        .slice(capBytes)
-        .split('\n')
-        .filter((l) => l.trim().length).length;
-      idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${idxPath}`;
-    }
+    const idx = readIndexCapped(idxPath, capBytes);
     parts.push(`## Claude Harness — ${label}\n\n${idx.trim()}`);
   }
 
@@ -182,9 +216,27 @@ function main() {
           `## Claude Harness — drift canary\n\n${openCount} open naming-miss${openCount === 1 ? '' : 'es'} across recent sessions — see ${canaryLogPath}`
         );
       }
-    } catch (_) {
-      /* malformed state file -- skip the rollup, never block SessionStart over it */
+    } catch (err) {
+      /* malformed state file -- skip the rollup, never block SessionStart over
+         it. Recorded: a corrupt canary state silently disables the rollup,
+         which reads identically to "no open misses" -- the reassuring answer. */
+      lib.recordHookError(err, `malformed ${canaryStatePath}`);
     }
+  }
+
+  // Hook-error rollup -- the read side of _lib.js's diagnostics channel. Every
+  // hook here is fail-open by contract, so a hook that throws on every single
+  // invocation produces exactly the same user-visible result as one with
+  // nothing to do: silence. This is the one place per session that says
+  // otherwise. Silent when clean, same context-economy rule as the canary
+  // rollup above.
+  const hookErrors = lib.readRecentHookErrors(HOOK_ERROR_WINDOW_MS);
+  if (hookErrors.count) {
+    parts.push(
+      `## Claude Harness — memory hook errors\n\n` +
+        `${hookErrors.count} hook error${hookErrors.count === 1 ? '' : 's'} recorded in the last 7 days — memory/gate hooks fail open, so some of this session's memory may be silently missing. Full log: ${hookErrors.path}\n\n` +
+        `Most recent: ${hookErrors.latest}`
+    );
   }
 
   if (parts.length) {
@@ -202,7 +254,10 @@ function main() {
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Never let a memory-hook failure surface to the user or block session start.
+  // Recorded so the next session's rollup above can report it -- including a
+  // failure of this hook itself.
+  lib.recordHookError(err, 'memory-init failed');
 }
 process.exit(0);

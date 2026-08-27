@@ -10,8 +10,16 @@ name: test
 # machine that actually dogfoods these hooks.
 on: [push, pull_request]
 
+# Read-only token: this workflow only checks out and runs tests, so it never
+# needs the default write-capable GITHUB_TOKEN a fork PR could aim at.
+permissions:
+  contents: read
+
 jobs:
-  memory-and-statusline-tests:
+  # The caveman + onboarding suites existed but were never wired in here, so
+  # every failure they could catch was invisible until someone ran them by
+  # hand -- a suite nothing runs is the same silent no-op as a swallowed error.
+  hook-tests:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
@@ -21,6 +29,15 @@ jobs:
       - name: memory hooks test suite
         shell: bash
         run: bash memory/hooks/test/run.sh
+      - name: caveman hooks test suite
+        shell: bash
+        run: bash caveman/hooks/test/run.sh
+      - name: onboarding + install.sh test suite
+        shell: bash
+        run: bash onboarding/test/run.sh
+      - name: verify.js RED-demo falsifiability suite
+        shell: bash
+        run: bash onboarding/test/red-demos.sh
       - name: statusline test suite
         shell: bash
         run: bash statusline/test.sh

@@ -21,7 +21,7 @@ function main() {
   const filePath = (input.tool_input || {}).file_path;
   if (!filePath || !/^(Read|Edit|Write)$/.test(toolName)) return;
 
-  const { scope, base } = lib.resolveScope(cwd);
+  const { scope, base } = lib.resolveScope(cwd, input.session_id);
   if (scope !== 'project') return; // watch_files are repo-relative; nothing to match in global scope
 
   const root = path.dirname(base);
@@ -84,8 +84,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Fail open: a broken recall/staleness pass must never block the tool call --
   // PostToolUse fires after the tool already ran, same posture as memory-checkpoint.js.
+  lib.recordHookError(err, 'memory-architecture failed');
 }
 process.exit(0);

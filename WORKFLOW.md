@@ -46,12 +46,21 @@ This rule targets one-off human-facing deliverables (reports, comparisons, analy
 ## Build
 
 - Apply `rules/engineering.md`: minimal safe code, surgical scope, reuse before you write.
-- TDD is a technique, not a gate — use the superpowers TDD skill when the task calls for test-first, not because a phase requires it (see `rules/engineering.md`).
+- TDD is a technique, not a gate — write the test first when the task calls for it (a bug with a crisp repro, a parser, a money/security path), not because a phase requires it (see `rules/engineering.md`). Corrected 2026-08-27: this used to say "use the superpowers TDD skill," which is not callable on this setup — the plugin is on disk but absent from `settings.json`'s `enabledPlugins`, so `Skill(superpowers:test-driven-development)` returns "Unknown skill" (external audit finding #13). Enabling it was considered and rejected: it ships a known open Windows `SessionStart` error (`skills/manifest.yaml` `known_issues`), which would trade a doc inaccuracy for a real per-session error. TDD here is discretionary, so naming no skill costs nothing.
 - For UI work, apply `rules/design-lane.md`'s sequence (explore → `ui-ux-pro-max` → component search → build).
 
 ## Verify
 
 - **External verification only** — run the tests, linter, build, and read their actual output. Never self-grade "done" from having written plausible code (`rules/security-invariants.md`, Tier 0 — Agent behavior).
+- **Is the harness itself alive? Ask it, don't assume it.**
+
+  ```bash
+  node ~/.claude/claude-harness/onboarding/verify.js --live
+  ```
+
+  Cheap (a few file reads plus one hook smoke-test), safe to run any time, and the only check here that can distinguish "wired" from "actually running." Without `--live` it checks the static install: rules/manifest present, every hook wired under the right event with a current matcher and pointing at a file that exists, `secret-guard` present + wired + blocking, `ponytail` enabled. With `--live` it additionally proves, for *this* session, that each every-turn hook really executed — by looking for this session's own id in the state those hooks write. It reports `DEAD` for a hook that is wired and present but never ran, and honestly labels what it *cannot* prove in-session (`PreCompact`/`SessionEnd`, and the read-only hooks that leave no footprint) rather than counting silence as success.
+
+  Run it when a gate's nudge hasn't appeared when you expected one, after `git pull`ing this pack, after editing `settings.json`, or before trusting any claim in these docs about a mechanical backstop. **Every check it makes has been demonstrated failing** against a deliberately-broken sandbox install — `bash onboarding/test/red-demos.sh`, 13 breakages, each asserted to produce its specific RED, plus a green baseline at both ends so the suite can't pass by the verifier being always-red. That falsification is the reason to believe a green: this same verifier reported all-green through four live broken findings before 2026-08-27, because every check it had was file-presence.
 - UI changes: `rules/design-lane.md`'s render-before-judging gate is hard, not optional — an actual screenshot compared against a "before," never a source/DOM/jsdom check standing in for one. If you can't verify visually in a given environment, say so explicitly rather than claiming success.
 - Memory checkpoint updates as you go — see `memory/SPEC.md` for the automatic hook-driven mechanism (no manual `/compact`).
 - **Episodic task-log, at a natural task boundary** (typically right before/after a commit): append one line to `<scope>/episodic/task-log.md`, exact field format in `memory/templates/task-log.md` (single source of truth for the format — don't restate the fields here, they've drifted out of sync with the template before). Pure append, no read-modify-write, same lock-free-by-construction safety as the lessons index. Stage 1 only — a raw log the promotion-review ritual above draws on, not itself injected anywhere by any hook (see `memory/SPEC.md`'s "Episodic task log" section). Stage 2 (a mechanical nudge reusing `lib.isGitCommitCommand`) is deliberately deferred, not built, until/unless Stage 1 is observed going unused.

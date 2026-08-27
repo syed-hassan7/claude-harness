@@ -5,7 +5,7 @@
 **A portable skill-and-rules pack for AI coding agents — advisory, not a state machine.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-3b82f6.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-6.3.0-3b82f6.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-6.5.0-3b82f6.svg)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-fully%20installed-3b82f6.svg)](#12-using-it-today)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-3b82f6.svg)](statusline/README.md)
 
@@ -71,7 +71,7 @@ No step is mechanically blocked. Skip what doesn't apply, revisit what needs it,
 
 ## 04 What's new
 
-**6.4.0** — an external audit found `review-gate-check.js` was a dead gate (transcript text-scan satisfied by Claude Code's own boilerplate) and `caveman-mode-tracker.js` silently killed caveman mode on any *mention* of the override phrase, even quoted/negated; both fixed structurally, plus `ponytail` (`required: true`) actually gets installed by `install.sh` now instead of being a manifest-only claim. **6.3.0** — the harness audited its own token spend and found a shipped-but-never-wired hook; all 4 gate hooks consolidated onto shared scaffolding. **6.2.0** — a cross-repo memory research pass found lessons had no way to graduate out of their own index, silently degrading with use instead of improving; a watermark-based promotion nudge and a Stage 1 episodic task log close it. **6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
+**6.5.0** — an error-handling review found every memory/gate hook's failure path was byte-identical to its nothing-to-do path, so a permanently broken hook looked exactly like a healthy idle one; hooks still never block, but failures now land in a bounded `~/.claude/diagnostics/hook-errors.log` and get surfaced at `SessionStart` (plus four latent data-loss bugs the silence was hiding), the four gate hooks share one `runGateHook` lifecycle, and a local-machine security pass closed a token-in-argv leak, a `/tmp` symlink race, terminal-escape injection, and a note-id path-traversal gap. **6.4.0** — an external audit found `review-gate-check.js` was a dead gate (transcript text-scan satisfied by Claude Code's own boilerplate) and `caveman-mode-tracker.js` silently killed caveman mode on any *mention* of the override phrase, even quoted/negated; both fixed structurally, plus `ponytail` (`required: true`) actually gets installed by `install.sh` now instead of being a manifest-only claim. **6.3.0** — the harness audited its own token spend and found a shipped-but-never-wired hook; all 4 gate hooks consolidated onto shared scaffolding. **6.2.0** — a cross-repo memory research pass found lessons had no way to graduate out of their own index, silently degrading with use instead of improving; a watermark-based promotion nudge and a Stage 1 episodic task log close it. **6.1.0** — two real "skill never actually fires" gaps found and closed with mechanical backstops (`review-gate-check.js`, `design-lane-gate-check.js`); the drift canary caught a real bug in itself the same day. Full entry, and everything before it: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## 05 Four things that make this different
 
@@ -107,8 +107,23 @@ Four rules in this pack are written as "hard," not advisory — and all four use
 | Run `/review-loop`/`security-audit` before a commit (`CLAUDE.md`) | `review-gate-check.js` | a `git commit`, no review-marker evidence in-session |
 | Render-before-judging on UI work (`rules/design-lane.md`) | `design-lane-gate-check.js` | a `git commit` touching a UI file, no screenshot/Playwright evidence in-session |
 | `visual-plan-local` Artifact companion on a non-trivial plan (`WORKFLOW.md:44`) | `visual-plan-gate-check.js` | `ExitPlanMode` on a non-trivial plan, no `Artifact` publish in-session |
+| Never write a secret literal (`rules/security-invariants.md`, Tier 0) | `security/hooks/secret-guard.js` | an `Edit`/`Write` whose content matches a secret pattern — **blocks**, exit 2 |
 
-Full design rationale, rejected alternatives, and state shape for each: `memory/SPEC.md`, one section per hook — canonical, not repeated here. All four opt-in, ship inside `--with-memory-hooks`; `install.sh --check` verifies they're actually wired into `settings.json`, not just present on disk.
+A fifth is not opt-in and does block: `security/hooks/secret-guard.js` (`PreToolUse` on `Edit|Write`) refuses a write containing a secret literal, exit 2. `rules/security-invariants.md` designates it the single mechanical backstop for all of Tier 0, so `install.sh` installs it unconditionally. Until 2026-08-27 it wasn't in this repo at all — it survived only as an untracked leftover from the retired v4 harness on one machine, meaning every fresh install shipped the rule and none of the hook.
+
+Full design rationale, rejected alternatives, and state shape for each: `memory/SPEC.md`, one section per hook — canonical, not repeated here. The four gate hooks are opt-in and ship inside `--with-memory-hooks`.
+
+### Proving the layer is alive, not just installed
+
+```bash
+node ~/.claude/claude-harness/onboarding/verify.js --live
+```
+
+Every backstop above is worth exactly what you can prove about it, and for a while the answer was "less than the docs claimed." A 27-probe external audit found two of these hooks dead in practice, a `required: true` skill never installed, and the security guard missing from the repo entirely — while `onboarding/verify.js` reported all-green, because every check it had was file-presence or a `settings.json` substring match.
+
+`--live` closes that gap by asking a different question: not *is it installed* but *did it run this session*. It parses `settings.json` properly (catching a hook wired under a stale matcher, or pointing at a file that no longer exists), smoke-tests the secret guard by actually running it, and then looks for **this session's own id** in the state the every-turn hooks write — reporting `DEAD` for anything wired, present, and still not executing. What it can't prove in-session (`PreCompact`, `SessionEnd`, read-only hooks with no footprint) it labels unprovable instead of counting silence as a pass.
+
+And because a checker nobody has watched fail is a checker nobody has watched work: `bash onboarding/test/red-demos.sh` breaks all 14 of its claims one at a time against a sandboxed fake install — unwire a hook, roll a matcher back, delete a hook file, remove/neuter/unwire the secret guard, disable ponytail, kill the caveman flag, empty a gate's state — and asserts each produces its specific RED, with a green baseline at both ends so the suite can't pass by the verifier being permanently red.
 
 ## 08 In practice — receipts, not claims
 
@@ -180,9 +195,13 @@ caveman/                    Default-on terse communication mode — hooks + skil
 
 onboarding/                 First-run install wizard, 2 surfaces sharing 1 source
 ├── steps.json               of truth: question wording (both surfaces) +
-├── verify.js                mechanical post-install check (both surfaces)
+├── verify.js                install check + `--live` session liveness probe
 ├── skills/onboarding/       in-CLI counterpart to install.sh --onboard
-└── test/run.sh              sandboxed suite — CLAUDE_HARNESS_TARGET + XDG_CONFIG_HOME
+├── test/run.sh              sandboxed suite — CLAUDE_HARNESS_TARGET + XDG_CONFIG_HOME
+└── test/red-demos.sh        breaks each verify.js check, asserts it goes RED
+
+security/hooks/              Tier 0 secret guard — the one backstop that BLOCKS.
+└── secret-guard.js          Always installed, no flag. See rules/security-invariants.md
 
 visual-plan-local/          Default plan-mode output: structured doc + Artifact,
 ├── skills/visual-plan-local/ not a long chat paragraph. Zero MCP/daemon —

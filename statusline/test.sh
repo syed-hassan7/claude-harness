@@ -144,4 +144,36 @@ OUT2=$(echo "" | bash "$STATUSLINE")
 pass "empty stdin still falls back to plain 'Claude'"
 
 echo ""
+echo "=== Test: payload-supplied escape sequences never reach the terminal ==="
+# The statusline is rendered with printf "%b", which interprets backslash
+# escapes -- so a model display_name (or branch name) carrying \033[2J would
+# otherwise be emitted as a real control sequence and could clear/repaint the
+# user's terminal from whatever fed the payload.
+ESC=$(printf '\033')
+EVIL_PAYLOAD='{"model":{"display_name":"Sonnet \\033[2J\\007evil"},"context_window":{"context_window_size":200000,"current_usage":{"input_tokens":1000}},"cwd":"/tmp"}'
+OUT4=$(echo "$EVIL_PAYLOAD" | bash "$STATUSLINE")
+case "$OUT4" in
+  *"${ESC}[2J"*) fail "a payload-supplied escape sequence was rendered as a real control sequence: $(printf '%s' "$OUT4" | cat -v)" ;;
+esac
+printf '%s' "$OUT4" | grep -q 'evil' || fail "sanitization dropped the legible part of the model name too: $(printf '%s' "$OUT4" | cat -v)"
+pass "escape sequences in the payload are neutralized while the readable text survives"
+
+echo ""
+echo "=== Test: usage cache lives in a private per-user dir, not a shared /tmp path ==="
+grep -Eq '^(cache_dir|cache_file)=.*/tmp/' "$STATUSLINE" && fail "statusline still caches under a world-writable, predictable /tmp path" || true
+grep -q 'XDG_CACHE_HOME' "$STATUSLINE" || fail "expected the usage cache to resolve under XDG_CACHE_HOME/HOME"
+grep -q 'mkdir -m 700' "$STATUSLINE" || fail "cache dir must be created 700 so another local user cannot read cached usage data"
+pass "usage cache is a private per-user directory created with restrictive permissions"
+
+echo ""
+echo "=== Test: the OAuth token is never passed as a curl command-line argument ==="
+# argv is world-readable via ps on Linux -- a token in `-H "Authorization:
+# Bearer $token"` is visible to every other local user for the request's
+# lifetime. It goes through a --config file on stdin instead.
+grep -q 'Authorization: Bearer' "$STATUSLINE" || fail "expected the OAuth header to still be sent somehow"
+grep -Eq '^[^#]*-H "Authorization' "$STATUSLINE" && fail "the OAuth token is back in curl's argv, where ps exposes it to other local users" || true
+grep -q -- '--config -' "$STATUSLINE" || fail "expected the Authorization header to be fed to curl via --config on stdin"
+pass "OAuth token reaches curl through stdin, never through argv"
+
+echo ""
 echo "ALL CHECKS PASSED"

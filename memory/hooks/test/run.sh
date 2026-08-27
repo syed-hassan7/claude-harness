@@ -251,8 +251,15 @@ find "$TRIM_ARCHIVE" -name '2020-old-*' | grep -q . && fail "day-old archive fil
 echo "=== Test 15: project archive trim -- count cap (16 recent files -> keep newest 10) ==="
 rm -rf "$TRIM_ARCHIVE"
 mkdir -p "$TRIM_ARCHIVE"
+# Stagger the fixtures' mtimes: trimProjectArchive ranks by mtime, so 15
+# files written inside the same second (the pre-2026-08-27 fixture) left the
+# ordering to readdir(), which made "the oldest one is evicted" a coin flip --
+# this test failed roughly 1 run in 3 on a fast disk. Entry 01 is now the
+# unambiguously oldest.
 for i in $(seq 1 15); do
-  echo "entry $i" > "$TRIM_ARCHIVE/2026-entry-$(printf '%02d' "$i").md"
+  ENTRY="$TRIM_ARCHIVE/2026-entry-$(printf '%02d' "$i").md"
+  echo "entry $i" > "$ENTRY"
+  touch_seconds_ago $(( (16 - i) * 60 )) "$ENTRY"
 done
 echo -e "# Session checkpoint\nscope: project\nrepo: trim_project\nsession_id: sT\nupdated: $(date -u +%Y-%m-%dT%H:%M:%S.000Z)\ngoal: \n" > "$TRIM_PROJECT_POSIX/.claude/session/checkpoint.md"
 run_hook memory-compact.js "$TRIM_PROJECT" '{"cwd":"'"$TRIM_PROJECT"'"}' > /dev/null
@@ -499,7 +506,7 @@ fs.writeFileSync('$PRUNE_PROJECT/.claude/canary/state.json', JSON.stringify(stat
 PRUNE_TRANSCRIPT_POSIX="$WORK/prune_transcript.jsonl"
 PRUNE_TRANSCRIPT="$WORK_WIN/prune_transcript.jsonl"
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"just some unrelated turn"}]}}' > "$PRUNE_TRANSCRIPT_POSIX"
-run_hook canary-check.js "$PRUNE_PROJECT" '{"cwd":"'"$PRUNE_PROJECT"'","session_id":"currentSession","transcript_path":"'"$PRUNE_TRANSCRIPT"'"}' > /dev/null
+run_hook canary-check.js "$PRUNE_PROJECT" '{"cwd":"'"$PRUNE_PROJECT"'","session_id":"canPruneSession","transcript_path":"'"$PRUNE_TRANSCRIPT"'"}' > /dev/null
 PRUNE_LOG="$PRUNE_PROJECT_POSIX/.claude/canary/log.md"
 grep -q "^EXPIRED .*oldWithPending.*rules/engineering.md" "$PRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$PRUNE_LOG" 2>/dev/null)"
 grep -q "oldNoPending" "$PRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
@@ -587,7 +594,7 @@ fs.writeFileSync('$REVPRUNE_PROJECT/.claude/review-gate/state.json', JSON.string
 REVPRUNE_TRANSCRIPT_POSIX="$WORK/revgate_prune_transcript.jsonl"
 REVPRUNE_TRANSCRIPT=$(win_path "$WORK")/revgate_prune_transcript.jsonl
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"unrelated turn"}]}}' > "$REVPRUNE_TRANSCRIPT_POSIX"
-run_hook review-gate-check.js "$REVPRUNE_PROJECT" '{"cwd":"'"$REVPRUNE_PROJECT"'","session_id":"currentSession","transcript_path":"'"$REVPRUNE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+run_hook review-gate-check.js "$REVPRUNE_PROJECT" '{"cwd":"'"$REVPRUNE_PROJECT"'","session_id":"revPruneSession","transcript_path":"'"$REVPRUNE_TRANSCRIPT"'","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
 REVPRUNE_LOG="$REVPRUNE_PROJECT_POSIX/.claude/review-gate/log.md"
 grep -q "^EXPIRED .*oldWithPending" "$REVPRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$REVPRUNE_LOG" 2>/dev/null)"
 grep -q "oldNoPending" "$REVPRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
@@ -679,7 +686,7 @@ const state = {
 };
 fs.writeFileSync('$DLGPRUNE_PROJECT/.claude/design-lane-gate/state.json', JSON.stringify(state));
 "
-run_hook design-lane-gate-check.js "$DLGPRUNE_PROJECT" '{"cwd":"'"$DLGPRUNE_PROJECT"'","session_id":"currentSession","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+run_hook design-lane-gate-check.js "$DLGPRUNE_PROJECT" '{"cwd":"'"$DLGPRUNE_PROJECT"'","session_id":"dlgPruneSession","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
 DLGPRUNE_LOG="$DLGPRUNE_PROJECT_POSIX/.claude/design-lane-gate/log.md"
 grep -q "^EXPIRED .*oldWithPending" "$DLGPRUNE_LOG" || fail "expected EXPIRED entry for pruned session with open pending: $(cat "$DLGPRUNE_LOG" 2>/dev/null)"
 grep -q "oldNoPending" "$DLGPRUNE_LOG" && fail "no-pending session should never appear in an EXPIRED log line" || true
@@ -952,7 +959,307 @@ run_hook visual-plan-gate-check.js "$VPG64_PROJECT" '{"cwd":"'"$VPG64_PROJECT"'"
 [ -d "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" ] && fail "a Read on an unrelated file should never create the state dir at all: $(ls "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" 2>/dev/null)"
 pass "visual-plan-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
+echo "=== Test 65: architecture note IDs that escape the notes dir are rejected before they become paths ==="
+# Both the index file and the watch map are repo-tracked -- an id like
+# ../../../.ssh/config would otherwise be path.join()'d into a write target
+# outside <scope>/architecture/notes/.
+TRAVERSAL_JSON=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+const bad = ['../../../.ssh/config', 'a/b', 'x\\\\y', '..', '.hidden'];
+const good = ['auth-flow', 'Auth_Flow.v2', 'a1'];
+console.log(JSON.stringify({
+  badIds: bad.filter((id) => lib.isSafeNoteId(id)),
+  goodIds: good.filter((id) => !lib.isSafeNoteId(id)),
+  badLine: lib.parseArchIndexLine('../../../.ssh/config | proj | tags | summary | notes/x.md'),
+  goodLine: !!lib.parseArchIndexLine('auth-flow | proj | tags | summary | notes/auth-flow.md'),
+}));
+")
+echo "$TRAVERSAL_JSON" | grep -q '"badIds":\[\]' || fail "isSafeNoteId accepted a traversing/unsafe note id: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"goodIds":\[\]' || fail "isSafeNoteId rejected an ordinary note id: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"badLine":null' || fail "parseArchIndexLine kept an index row whose id escapes the notes dir: $TRAVERSAL_JSON"
+echo "$TRAVERSAL_JSON" | grep -q '"goodLine":true' || fail "parseArchIndexLine dropped a legitimate index row: $TRAVERSAL_JSON"
+pass "note ids that would escape architecture/notes/ are rejected at parse time, ordinary ids still pass"
+
+echo "=== Test 66: watch-map entries with unsafe ids are dropped, safe siblings survive ==="
+WATCH_POSIX="$WORK/watchmap_proj"
+mkdir -p "$WATCH_POSIX/.claude/architecture"
+printf '{"src/app.ts":["auth-flow","../../../.ssh/config"],"src/b.ts":["../evil"]}' \
+  > "$WATCH_POSIX/.claude/architecture/watch-map.json"
+WATCH_MAP_JSON=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+console.log(JSON.stringify(lib.readWatchMap('$(win_path "$WATCH_POSIX")/.claude')));
+")
+echo "$WATCH_MAP_JSON" | grep -q '\.ssh' && fail "readWatchMap passed a traversing id through to the note-path builder: $WATCH_MAP_JSON"
+echo "$WATCH_MAP_JSON" | grep -q '"src/b.ts"' && fail "an entry whose only id was unsafe should drop out entirely: $WATCH_MAP_JSON"
+echo "$WATCH_MAP_JSON" | grep -q 'auth-flow' || fail "readWatchMap dropped a safe id alongside the unsafe one: $WATCH_MAP_JSON"
+pass "readWatchMap keeps safe ids and drops the ones that would escape the notes dir"
+
+echo "=== Test 67: stripSecrets redacts the credential classes this pack's own machine holds ==="
+REDACT_OUT=$(node -e "
+const lib = require('$HOOKS_WIN/_lib.js');
+const samples = [
+  'key sk-ant-api03-AAAABBBBCCCCDDDDEEEE',
+  'Authorization: Bearer abcdefghijklmnop0123456789',
+  'token: \"hunter2hunter2\"',
+];
+console.log(samples.map((s) => lib.stripSecrets(s)).join('\n'));
+")
+echo "$REDACT_OUT" | grep -q 'sk-ant-api03' && fail "an Anthropic key survived stripSecrets: $REDACT_OUT"
+echo "$REDACT_OUT" | grep -q 'abcdefghijklmnop' && fail "a bearer token survived stripSecrets: $REDACT_OUT"
+echo "$REDACT_OUT" | grep -q 'hunter2' && fail "a quoted token assignment survived stripSecrets: $REDACT_OUT"
+pass "stripSecrets redacts Anthropic keys, bearer tokens, and quoted token assignments"
+
+echo "=== Test 65: an unparseable hook payload is recorded, not silently treated as an empty one ==="
+# Every hook here is fail-open by contract, which means a payload shape that
+# stopped parsing degrades into a permanent silent no-op -- indistinguishable
+# from "nothing to do". Exit 0 must survive; silence must not.
+D65_HOME_POSIX="$WORK/diag65_home"
+mkdir -p "$D65_HOME_POSIX"
+D65_HOME=$(win_path "$D65_HOME_POSIX")
+D65_CWD_POSIX="$WORK/diag65_cwd"
+mkdir -p "$D65_CWD_POSIX"
+D65_CWD=$(win_path "$D65_CWD_POSIX")
+CLAUDE_HARNESS_HOME_OVERRIDE="$D65_HOME" run_hook memory-checkpoint.js "$D65_CWD" '{"cwd":"not closed' > /dev/null \
+  || fail "a malformed payload must still exit 0 -- fail-open is not negotiable"
+D65_LOG="$D65_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+[ -f "$D65_LOG" ] || fail "malformed payload left no diagnostic record at $D65_LOG"
+grep -q 'unparseable hook payload' "$D65_LOG" || fail "diagnostic recorded but not identifiable as a payload-parse failure: $(cat "$D65_LOG")"
+grep -q 'memory-checkpoint.js' "$D65_LOG" || fail "diagnostic does not name the hook that failed: $(cat "$D65_LOG")"
+pass "an unparseable hook payload still exits 0 but leaves an attributable diagnostic"
+
+echo "=== Test 66: SessionStart surfaces recent hook errors, and stays silent about stale ones ==="
+D66_HOME_POSIX="$WORK/diag66_home"
+mkdir -p "$D66_HOME_POSIX/.claude/diagnostics"
+D66_HOME=$(win_path "$D66_HOME_POSIX")
+D66_CWD_POSIX="$WORK/diag66_cwd"
+mkdir -p "$D66_CWD_POSIX"
+D66_CWD=$(win_path "$D66_CWD_POSIX")
+D66_LOG="$D66_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+printf '%s | memory-compact.js | memory-compact failed | Error: EACCES\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > "$D66_LOG"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$D66_HOME" run_hook memory-init.js "$D66_CWD" '{"cwd":"'"$D66_CWD"'","session_id":"d66"}')
+echo "$OUT" | grep -q 'memory hook errors' || fail "SessionStart did not surface a recent hook error at all, got: $OUT"
+echo "$OUT" | grep -q 'memory-compact failed' || fail "rollup surfaced no identifying detail from the recorded error, got: $OUT"
+# Older than the 7-day window: a problem that was already fixed must stop being
+# reported, same silence-when-clean rule as the canary rollup.
+printf '2020-01-01T00:00:00.000Z | memory-compact.js | memory-compact failed | Error: EACCES\n' > "$D66_LOG"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$D66_HOME" run_hook memory-init.js "$D66_CWD" '{"cwd":"'"$D66_CWD"'","session_id":"d66b"}')
+echo "$OUT" | grep -q 'memory hook errors' && fail "a hook error well outside the reporting window must not be surfaced, got: $OUT"
+pass "SessionStart reports recent hook errors and drops ones outside the window"
+
+echo "=== Test 67: corrupt gate state is quarantined, not silently overwritten ==="
+# Reading corrupt state as {} and then writing over it destroys every unresolved
+# miss in the file with no EXPIRED line and no trace -- the exact loss
+# pruneIdleGateSessions' EXPIRED lines exist to prevent.
+D67_PROJECT_POSIX="$WORK/diag67_project"
+mkdir -p "$D67_PROJECT_POSIX/.claude/canary"
+(cd "$D67_PROJECT_POSIX" && git init -q)
+D67_PROJECT=$(win_path "$D67_PROJECT_POSIX")
+D67_STATE="$D67_PROJECT_POSIX/.claude/canary/state.json"
+printf '{"sX":{"pending":{"file":"WORKFLOW.md"' > "$D67_STATE"
+run_hook canary-check.js "$D67_PROJECT" '{"cwd":"'"$D67_PROJECT"'","session_id":"sY"}' > /dev/null \
+  || fail "corrupt gate state must not stop the hook from exiting 0"
+[ -f "$D67_STATE.corrupt" ] || fail "corrupt state was overwritten instead of preserved at $D67_STATE.corrupt"
+grep -q 'WORKFLOW.md' "$D67_STATE.corrupt" || fail "quarantined file does not contain the original bytes: $(cat "$D67_STATE.corrupt")"
+node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$D67_STATE" \
+  || fail "hook did not write a valid replacement state file"
+grep -q 'corrupt gate state' "$D67_PROJECT_POSIX/.claude/diagnostics/hook-errors.log" 2>/dev/null \
+  || grep -q 'corrupt gate state' "$FAKE_HOME_POSIX/.claude/diagnostics/hook-errors.log" \
+  || fail "corrupt state was quarantined but never recorded as an error"
+pass "corrupt gate state is quarantined and recorded, and the gate keeps working"
+
+echo "=== Test 68: a session whose lastSeen is unparseable still gets pruned and closed out ==="
+# Date.parse of a corrupt timestamp is NaN, and `NaN < cutoff` is false -- which
+# made such a session immortal: never pruned, its open miss never EXPIRED.
+D68_PROJECT_POSIX="$WORK/diag68_project"
+mkdir -p "$D68_PROJECT_POSIX/.claude/canary"
+(cd "$D68_PROJECT_POSIX" && git init -q)
+D68_PROJECT=$(win_path "$D68_PROJECT_POSIX")
+printf '{"stale":{"offset":0,"pending":{"file":"WORKFLOW.md","at":"whenever"},"lastSeen":"not-a-timestamp"}}' \
+  > "$D68_PROJECT_POSIX/.claude/canary/state.json"
+run_hook canary-check.js "$D68_PROJECT" '{"cwd":"'"$D68_PROJECT"'","session_id":"fresh"}' > /dev/null
+grep -q 'EXPIRED' "$D68_PROJECT_POSIX/.claude/canary/log.md" || fail "no EXPIRED line logged for the pruned session: $(cat "$D68_PROJECT_POSIX/.claude/canary/log.md" 2>/dev/null)"
+node -e "
+  const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+  if (s.stale) { console.error('session with a corrupt lastSeen survived pruning'); process.exit(1); }
+" "$D68_PROJECT_POSIX/.claude/canary/state.json" || fail "session with an unparseable lastSeen was never pruned"
+pass "an unparseable lastSeen reads as idle: the session is pruned and its open miss logged EXPIRED"
+
+echo "=== Test 69: a malformed watch-map is recorded instead of silently disabling file-touch recall ==="
+D69_PROJECT_POSIX="$WORK/diag69_project"
+mkdir -p "$D69_PROJECT_POSIX/.claude/architecture"
+(cd "$D69_PROJECT_POSIX" && git init -q)
+D69_PROJECT=$(win_path "$D69_PROJECT_POSIX")
+D69_HOME_POSIX="$WORK/diag69_home"
+mkdir -p "$D69_HOME_POSIX"
+D69_HOME=$(win_path "$D69_HOME_POSIX")
+printf '{"src/app.js": [' > "$D69_PROJECT_POSIX/.claude/architecture/watch-map.json"
+CLAUDE_HARNESS_HOME_OVERRIDE="$D69_HOME" run_hook memory-architecture.js "$D69_PROJECT" '{"cwd":"'"$D69_PROJECT"'","tool_name":"Read","tool_input":{"file_path":"'"$D69_PROJECT"'/src/app.js"}}' > /dev/null \
+  || fail "a malformed watch-map must not stop the hook from exiting 0"
+grep -q 'malformed' "$D69_HOME_POSIX/.claude/diagnostics/hook-errors.log" \
+  || fail "malformed watch-map left no diagnostic: $(cat "$D69_HOME_POSIX/.claude/diagnostics/hook-errors.log" 2>/dev/null)"
+pass "a malformed watch-map.json is recorded rather than silently disabling recall"
+
+echo "=== Test 70: the diagnostics log is bounded -- a permanently failing hook cannot grow it forever ==="
+D70_HOME_POSIX="$WORK/diag70_home"
+mkdir -p "$D70_HOME_POSIX/.claude/diagnostics"
+D70_HOME=$(win_path "$D70_HOME_POSIX")
+D70_CWD_POSIX="$WORK/diag70_cwd"
+mkdir -p "$D70_CWD_POSIX"
+D70_CWD=$(win_path "$D70_CWD_POSIX")
+D70_LOG="$D70_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+node -e "
+  const fs = require('fs');
+  const line = new Array(200).join('x');
+  fs.writeFileSync(process.argv[1], Array.from({ length: 2000 }, (_, i) => '2026-01-01T00:00:00.000Z | pad | pad ' + i + ' | ' + line).join('\n') + '\n');
+" "$D70_LOG"
+CLAUDE_HARNESS_HOME_OVERRIDE="$D70_HOME" run_hook memory-checkpoint.js "$D70_CWD" '{"cwd":"broken' > /dev/null
+D70_SIZE=$(node -e "process.stdout.write(String(require('fs').statSync(process.argv[1]).size))" "$D70_LOG")
+[ "$D70_SIZE" -le 65536 ] || fail "diagnostics log was not trimmed back under its cap, size is $D70_SIZE"
+grep -q 'unparseable hook payload' "$D70_LOG" || fail "trim dropped the newest entry -- the one that just happened: $(tail -1 "$D70_LOG")"
+pass "the diagnostics log stays under its size cap and keeps the newest entries"
+
+echo "=== Test 71: a failed atomic write leaves no temp file behind ==="
+# atomicWrite used to leak its scratch file on a failed rename, under a name
+# nothing reads or cleans up. Forced here by making the rename target a
+# directory, which no write can replace.
+D71_DIR_POSIX="$WORK/diag71"
+mkdir -p "$D71_DIR_POSIX/target.md"
+node -e "
+  const lib = require(process.argv[1] + '/_lib.js');
+  const target = process.argv[2] + '/target.md';
+  let threw = false;
+  try { lib.atomicWrite(target, 'content'); } catch (_) { threw = true; }
+  if (!threw) { console.error('atomicWrite silently succeeded against an unwritable target'); process.exit(1); }
+  const leftover = require('fs').readdirSync(process.argv[2]).filter((f) => f.includes('.tmp.'));
+  if (leftover.length) { console.error('leftover temp file(s): ' + leftover.join(', ')); process.exit(1); }
+" "$HOOKS_WIN" "$(win_path "$D71_DIR_POSIX")" || fail "atomicWrite either swallowed the failure or leaked a temp file"
+pass "a failed atomicWrite propagates the error to its caller and cleans up its temp file"
+
 echo ""
+echo "=== Test 65: isGitCommitCommand -- real commit shapes match, mere MENTIONS of a commit do not ==="
+# Adversarial in both directions. The pre-2026-08-27 matcher (`\bgit\b...\bcommit\b`)
+# was only ever checked against `git commit -m "x"`. It was never fed the commit
+# forms this pack's OWN instructions mandate (PowerShell here-string, bash
+# heredoc), nor the ordinary Bash calls that merely name a commit -- and it
+# false-fired on the latter, logging a MISS for a commit that never ran.
+cat > "$WORK/t65.js" <<'T65'
+const lib = require(process.argv[2] + '/_lib.js');
+// [label, command, mustMatch]
+const CASES = [
+  // real commit shapes -- every one of these MUST fire the gate
+  ['plain', 'git commit -m "fix"', true],
+  ['add chained', 'git add -A && git commit -m "fix"', true],
+  ['amend', 'git commit --amend --no-edit', true],
+  ['-am', 'git commit -am "fix"', true],
+  ['bare (opens editor)', 'git commit', true],
+  ['git -C <path>', 'git -C /repo commit -m x', true],
+  ['cd then commit', 'cd /repo; git commit -m x', true],
+  ['rtk wrapper (this pack ships rtk)', 'rtk git commit -m x', true],
+  ['bash heredoc -F -', 'git commit -F - <<EOF\nsubject\n\nbody\nEOF', true],
+  ['PowerShell here-string (CLAUDE.md mandates this form)', "git commit -m @'\nsubject line\n\nbody with $literal\n'@", true],
+  ['command substitution', '$(git commit -m x)', true],
+
+  // NOT a commit -- these must stay silent
+  ['path naming a commit doc', 'cat docs/git-commit-pr.md', false],
+  ['hyphenated token', 'ls .github/git-commit-hooks/', false],
+  ['docker commit after git status', 'git status && docker commit foo', false],
+  ['git log format', 'git log --format=%s', false],
+  ['no git at all', 'npm run build', false],
+];
+let bad = [];
+for (const [label, cmd, want] of CASES) {
+  const got = lib.isGitCommitCommand(cmd);
+  if (got !== want) bad.push(`${want ? 'MISSED' : 'FALSE-FIRED'}: ${label}`);
+}
+console.log(bad.length ? 'BAD ' + bad.join(' | ') : 'OK');
+T65
+T65_OUT=$(node "$WORK/t65.js" "$HOOKS_WIN")
+[ "$T65_OUT" = "OK" ] || fail "isGitCommitCommand mismatch -> $T65_OUT"
+pass "isGitCommitCommand: 11 real commit shapes match, 5 commit-mentions do not"
+
+echo "=== Test 66: session scope is PINNED -- one session_id cannot split its state across two scopes ==="
+# The external audit's finding #5, as an executable regression. A hook's
+# `input.cwd` follows the Bash tool's PERSISTED cwd, so one `cd` mid-session
+# used to move every later write into a different scope, silently losing state.
+PIN_HOME_POSIX="$WORK/pin_home"
+mkdir -p "$PIN_HOME_POSIX/.claude"          # pack installed here -> pinning active
+PIN_HOME=$(win_path "$PIN_HOME_POSIX")
+PIN_A_POSIX="$WORK/pin_repo_a"; mkdir -p "$PIN_A_POSIX"; (cd "$PIN_A_POSIX" && git init -q)
+PIN_B_POSIX="$WORK/pin_repo_b"; mkdir -p "$PIN_B_POSIX"; (cd "$PIN_B_POSIX" && git init -q)
+PIN_A=$(win_path "$PIN_A_POSIX"); PIN_B=$(win_path "$PIN_B_POSIX")
+
+# turn 1: session starts in repo A -> pin taken from the launch cwd
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_HOME" run_hook review-gate-check.js "$PIN_A" '{"cwd":"'"$PIN_A"'","session_id":"pinS1","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+[ -f "$PIN_A_POSIX/.claude/review-gate/state.json" ] || fail "first write should land in repo A"
+# turn 2: a Bash `cd` has moved cwd into repo B -- same session
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_HOME" run_hook review-gate-check.js "$PIN_B" '{"cwd":"'"$PIN_B"'","session_id":"pinS1","tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' > /dev/null
+[ -e "$PIN_B_POSIX/.claude" ] && fail "REGRESSION (audit finding #5): a cd into repo B split session pinS1's state into a second scope"
+grep -q "MISS" "$PIN_A_POSIX/.claude/review-gate/log.md" || fail "the commit MISS should have been logged in the PINNED scope (repo A), not lost: $(cat "$PIN_A_POSIX/.claude/review-gate/log.md" 2>/dev/null)"
+grep -q '"pinS1"' "$PIN_HOME_POSIX/.claude/session-scope.json" || fail "pin file missing the session entry: $(cat "$PIN_HOME_POSIX/.claude/session-scope.json" 2>/dev/null)"
+pass "one session_id resolves to one scope across a mid-session cwd change, and the pin is recorded at global scope"
+
+echo "=== Test 67: a DIFFERENT session in repo B is unaffected by the pin (no cross-session bleed) ==="
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_HOME" run_hook review-gate-check.js "$PIN_B" '{"cwd":"'"$PIN_B"'","session_id":"pinS2","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+[ -f "$PIN_B_POSIX/.claude/review-gate/state.json" ] || fail "a genuinely different session in repo B must resolve to repo B"
+pass "pinning is per-session -- it does not collapse every session onto the first-seen scope"
+
+echo "=== Test 68: pinning never CREATES <home>/.claude, and an id-less session is never pinned ==="
+# Guards the Test 1 invariant: memory-init.js is a pure read at SessionStart and
+# must leave no footprint. If pinning created the directory it would break that.
+PIN_NOHOME_POSIX="$WORK/pin_nohome"     # deliberately NO .claude inside
+mkdir -p "$PIN_NOHOME_POSIX"
+PIN_NOHOME=$(win_path "$PIN_NOHOME_POSIX")
+PIN_C_POSIX="$WORK/pin_repo_c"; mkdir -p "$PIN_C_POSIX"; (cd "$PIN_C_POSIX" && git init -q)
+PIN_C=$(win_path "$PIN_C_POSIX")
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_NOHOME" run_hook review-gate-check.js "$PIN_C" '{"cwd":"'"$PIN_C"'","session_id":"pinS3","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+[ -e "$PIN_NOHOME_POSIX/.claude" ] && fail "pinning created <home>/.claude as a side effect -- breaks the no-footprint invariant Test 1 guards"
+# id-less input: must not be pinned under the literal 'unknown' bucket
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_HOME" run_hook review-gate-check.js "$PIN_C" '{"cwd":"'"$PIN_C"'","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+grep -q '"unknown"' "$PIN_HOME_POSIX/.claude/session-scope.json" && fail "the 'unknown' session bucket must never be pinned -- all id-less sessions would collide on one scope"
+pass "no directory created to pin, and id-less sessions are left unpinned"
+
+echo "=== Test 69: a pin older than the 30-day TTL is pruned ==="
+PIN_OLD_ISO=$(node -e "console.log(new Date(Date.now() - 31*24*60*60*1000).toISOString())")
+node -e "
+const fs = require('fs');
+fs.writeFileSync('$PIN_HOME/.claude/session-scope.json', JSON.stringify({
+  staleSession: { scope: 'global', base: 'X:/gone', repo: null, at: '$PIN_OLD_ISO' }
+}));
+"
+CLAUDE_HARNESS_HOME_OVERRIDE="$PIN_HOME" run_hook review-gate-check.js "$PIN_C" '{"cwd":"'"$PIN_C"'","session_id":"pinS4","tool_name":"Bash","tool_input":{"command":"ls"}}' > /dev/null
+grep -q "staleSession" "$PIN_HOME_POSIX/.claude/session-scope.json" && fail "a pin idle > 30d should have been pruned: $(cat "$PIN_HOME_POSIX/.claude/session-scope.json")"
+grep -q "pinS4" "$PIN_HOME_POSIX/.claude/session-scope.json" || fail "the fresh pin should still have been written while pruning"
+pass "stale pins are pruned on write, fresh pin survives"
+
+echo ""
+echo "=== Test 70: memory-init.js nudges when the injected checkpoint has an empty goal ==="
+# Audit finding #2: WORKFLOW.md predicts the empty-goal failure in its own text,
+# and a real injected checkpoint had it. Both directions tested -- silence when
+# a goal IS present matters as much as the nudge, or the block becomes noise
+# every single session and gets tuned out.
+GOAL_HOME_POSIX="$WORK/goal_home"; mkdir -p "$GOAL_HOME_POSIX/.claude/session"
+GOAL_HOME=$(win_path "$GOAL_HOME_POSIX")
+GOAL_CWD_POSIX="$WORK/goal_cwd"; mkdir -p "$GOAL_CWD_POSIX"
+GOAL_CWD=$(win_path "$GOAL_CWD_POSIX")
+GOAL_CP="$GOAL_HOME_POSIX/.claude/session/checkpoint.md"
+
+# (a) empty goal -> nudge
+printf '# Session checkpoint\nscope: global\nsession_id: goalS1\ngoal:\nfiles:\n  - a.js\n' > "$GOAL_CP"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$GOAL_HOME" run_hook memory-init.js "$GOAL_CWD" '{"cwd":"'"$GOAL_CWD"'","session_id":"goalS1"}')
+echo "$OUT" | grep -q "checkpoint had no .goal" || fail "expected an empty-goal nudge, got: $OUT"
+
+# (b) whitespace-only goal -> still a nudge (a space is not a goal)
+printf '# Session checkpoint\nscope: global\nsession_id: goalS1\ngoal:    \nfiles:\n  - a.js\n' > "$GOAL_CP"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$GOAL_HOME" run_hook memory-init.js "$GOAL_CWD" '{"cwd":"'"$GOAL_CWD"'","session_id":"goalS1"}')
+echo "$OUT" | grep -q "checkpoint had no .goal" || fail "whitespace-only goal should still nudge, got: $OUT"
+
+# (c) real goal -> silence
+printf '# Session checkpoint\nscope: global\nsession_id: goalS1\ngoal: ship the wiring verifier\nfiles:\n  - a.js\n' > "$GOAL_CP"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$GOAL_HOME" run_hook memory-init.js "$GOAL_CWD" '{"cwd":"'"$GOAL_CWD"'","session_id":"goalS1"}')
+echo "$OUT" | grep -q "checkpoint had no .goal" && fail "a checkpoint WITH a goal must not be nudged -- that turns the block into per-session noise"
+echo "$OUT" | grep -q "previous session checkpoint" || fail "the checkpoint itself should still be injected: $OUT"
+pass "empty/whitespace goal nudges, a real goal stays silent"
+
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true
 if ! NEW_PATHS="$(comm -13 <(printf '%s\n' "$PRE_SESSION_SNAPSHOT") <(printf '%s\n' "$POST_SESSION_SNAPSHOT"))"; then

@@ -16,11 +16,23 @@ const path = require('path');
 const os = require('os');
 
 function readHookInput() {
+  let raw;
   try {
     if (process.stdin.isTTY) return {};
-    const raw = fs.readFileSync(0, 'utf8').trim();
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) {
+    raw = fs.readFileSync(0, 'utf8').trim();
+  } catch (err) {
+    recordHookError(err, 'reading hook stdin');
+    return {};
+  }
+  if (!raw) return {}; // no payload at all -- normal for a manual/TTY-less run
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    // An unparseable payload is not the same thing as an empty one: if Claude
+    // Code's hook payload shape ever changes, EVERY hook here degrades into a
+    // silent no-op that is indistinguishable from "nothing to do". Still fail
+    // open with {}, but leave a trace first.
+    recordHookError(err, 'unparseable hook payload');
     return {};
   }
 }
@@ -50,12 +62,83 @@ function walkForGitRoot(startDir) {
 }
 
 // Returns { scope: 'project'|'global', base: <dir containing session/ and lessons/>, repo: <name or null> }
-function resolveScope(cwd) {
+function resolveScopeFromCwd(cwd) {
   const root = walkForGitRoot(cwd || process.cwd());
   if (root) {
     return { scope: 'project', base: path.join(root, '.claude'), repo: path.basename(root) };
   }
   return { scope: 'global', base: path.join(homeDir(), '.claude'), repo: null };
+}
+
+const SESSION_SCOPE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // prune pins idle > 30 days
+
+// One session, one scope -- pinned on first sight, keyed by session_id, and
+// always stored at GLOBAL scope because that is the only location every scope
+// can agree to look in.
+//
+// Why this exists: a hook's `input.cwd` is the Bash tool's PERSISTED cwd, not
+// the session's launch cwd. A single `cd` inside one Bash call therefore moves
+// every later hook write to a different scope, splitting one session's
+// gate/canary/checkpoint state across two directories (external audit
+// 2026-08-27, finding #5 -- proven live: this repo's own session wrote gate
+// state into a throwaway repo's `.claude/` after one `cd`, where it is
+// effectively lost, and `memory-init.js` then injects the wrong scope's
+// checkpoint next session). Nothing in memory/SPEC.md ever described
+// mid-session scope migration because it was never intended.
+//
+// SessionStart's `memory-init.js` is normally the first hook to see a session
+// id, so in practice the pin is taken from the session's real launch cwd --
+// which is the scope the whole memory layer means by "this session's scope".
+// To deliberately re-pin a session, delete its entry from the pin file.
+function sessionScopePath() {
+  return path.join(homeDir(), '.claude', 'session-scope.json');
+}
+
+function resolveScope(cwd, sessionId) {
+  const resolved = resolveScopeFromCwd(cwd);
+  // No usable session id (direct tooling, tests, the 'unknown' bucket) -- there
+  // is nothing to pin against, so behave exactly as before.
+  if (!sessionId || sessionId === 'unknown') return resolved;
+
+  const pinPath = sessionScopePath();
+  // Never CREATE <home>/.claude just to pin. `memory-init.js` is a pure read
+  // at SessionStart and must leave no footprint on a home/repo that has
+  // nothing to inject (memory/hooks/test/run.sh, Test 1) -- and if that
+  // directory doesn't exist, Claude Code isn't installed there, so no hook is
+  // running anyway. Skipping the pin degrades to exactly the pre-fix behavior.
+  if (!fs.existsSync(path.dirname(pinPath))) return resolved;
+
+  let result = resolved;
+  try {
+    // Read INSIDE the lock and re-check: two hooks firing concurrently at
+    // session start must not both write a first pin.
+    withLock(`${pinPath}.lock`, () => {
+      let pins = {};
+      try {
+        pins = JSON.parse(fs.readFileSync(pinPath, 'utf8')) || {};
+      } catch (_) {
+        pins = {};
+      }
+      const pin = pins[sessionId];
+      if (pin && pin.base) {
+        result = { scope: pin.scope, base: pin.base, repo: pin.repo || null };
+        return;
+      }
+      pins[sessionId] = { scope: resolved.scope, base: resolved.base, repo: resolved.repo, at: nowISO() };
+      const cutoff = Date.now() - SESSION_SCOPE_TTL_MS;
+      for (const [id, p] of Object.entries(pins)) {
+        if (p && p.at && Date.parse(p.at) < cutoff) delete pins[id];
+      }
+      atomicWrite(pinPath, `${JSON.stringify(pins, null, 1)}\n`);
+    });
+    // ponytail: a contended lock (withLock -> false) falls through to the
+    // unpinned cwd result for that one call rather than retrying. Worst case
+    // is one hook invocation landing in the pre-fix scope during the
+    // sub-millisecond first-pin window; the next call reads the written pin.
+  } catch (_) {
+    /* best-effort -- an unpinnable session behaves exactly as it did pre-fix */
+  }
+  return result;
 }
 
 function ensureDir(dir) {
@@ -67,9 +150,107 @@ function ensureGitignore(dir) {
   if (!fs.existsSync(gi)) {
     try {
       fs.writeFileSync(gi, '*\n!.gitignore\n');
-    } catch (_) {
-      /* best-effort */
+    } catch (err) {
+      recordHookError(err, `writing ${gi}`);
     }
+  }
+}
+
+// ---- Diagnostics channel.
+//
+// Every hook in this directory ends in a fail-open catch, and that posture is
+// correct -- a broken memory hook must never block an Edit/Write or a prompt.
+// Fail-open is not the same thing as fail-silent, though: a hook that throws
+// on every single invocation (unwritable ~/.claude, corrupt state, a payload
+// shape that changed under us) looks exactly like a hook with nothing to do,
+// forever. Same failure class as the dead gates 6.4.0's audit found, one
+// level down. So every catch that used to swallow an error now records one
+// bounded line here, and memory-init.js surfaces the count at SessionStart.
+//
+// Always the HOME scope, never the project's .claude/ -- project scope is
+// resolved from cwd, and cwd resolution is one of the things that can fail;
+// dropping a diagnostics directory into someone's repo as a side effect of a
+// failure is the footprint memory-init.js already refuses to make.
+const DIAGNOSTICS_MAX_BYTES = 64 * 1024;
+const DIAGNOSTICS_KEEP_LINES = 200;
+
+function diagnosticsLogPath() {
+  return path.join(homeDir(), '.claude', 'diagnostics', 'hook-errors.log');
+}
+
+function trimDiagnosticsLog(logPath) {
+  const stat = fs.statSync(logPath);
+  if (stat.size <= DIAGNOSTICS_MAX_BYTES) return;
+  const lines = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter(Boolean);
+  const kept = lines.slice(-DIAGNOSTICS_KEEP_LINES);
+  atomicWrite(logPath, kept.join('\n') + '\n');
+}
+
+// Reentrancy guard: this function's own helpers (ensureDir/ensureGitignore)
+// report their failures through this same function, which would recurse
+// forever on an unwritable home directory -- the exact case where it is most
+// likely to fail.
+let recordingHookError = false;
+
+// Never throws: callers are already on their failure path, and a diagnostics
+// write that raised would convert a survivable error into the crash the
+// fail-open catch exists to prevent.
+function recordHookError(err, context) {
+  if (recordingHookError) return;
+  recordingHookError = true;
+  try {
+    const logPath = diagnosticsLogPath();
+    ensureDir(path.dirname(logPath));
+    ensureGitignore(path.dirname(logPath));
+    const hook = path.basename(process.argv[1] || 'unknown');
+    const detail = err && err.stack ? String(err.stack).split(/\r?\n/).slice(0, 2).join(' -- ') : String(err);
+    const line = `${nowISO()} | ${hook} | ${context || 'no context'} | ${stripSecrets(detail).replace(/\s+/g, ' ')}`;
+    fs.appendFileSync(logPath, line + '\n');
+    trimDiagnosticsLog(logPath);
+  } catch (_) {
+    // End of the line: the diagnostics channel itself is unavailable (read-only
+    // home, disk full). There is nowhere left to escalate to that wouldn't
+    // break the tool call this hook is not allowed to break.
+  } finally {
+    recordingHookError = false;
+  }
+}
+
+// Rollup for memory-init.js's SessionStart injection -- the read side of the
+// channel above. Silent when clean, same context-economy rule as the canary
+// rollup it sits next to.
+function readRecentHookErrors(windowMs) {
+  const logPath = diagnosticsLogPath();
+  let raw;
+  try {
+    raw = fs.readFileSync(logPath, 'utf8');
+  } catch (_) {
+    return { count: 0, path: logPath, latest: null };
+  }
+  const cutoff = Date.now() - windowMs;
+  const recent = raw
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .filter((line) => {
+      const at = Date.parse(line.split('|')[0].trim());
+      // An unparseable leading timestamp counts as recent rather than being
+      // dropped -- an error record is exactly the wrong thing to discard
+      // because its own formatting is suspect.
+      return !Number.isFinite(at) || at >= cutoff;
+    });
+  return { count: recent.length, path: logPath, latest: recent.length ? recent[recent.length - 1] : null };
+}
+
+// Moves a file whose contents can't be parsed aside under a single fixed name
+// (no timestamp -- one quarantine slot per file, so this can't grow without
+// bound) instead of letting the caller's next write silently overwrite it.
+function quarantineCorruptFile(filePath) {
+  try {
+    fs.renameSync(filePath, `${filePath}.corrupt`);
+    return `${filePath}.corrupt`;
+  } catch (err) {
+    recordHookError(err, `quarantining ${filePath}`);
+    return null;
   }
 }
 
@@ -78,7 +259,12 @@ const SECRET_PATTERNS = [
   /(?:aws)?[_-]?secret[_-]?access[_-]?key\s*[=:]\s*['"]?[A-Za-z0-9/+=]{40}/gi,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
   /ghp_[A-Za-z0-9]{36,}/g,
-  /(?:api[_-]?key|password|secret)\s*[=:]\s*['"][^'"\s]{8,}['"]/gi,
+  // Anthropic keys and OAuth tokens -- the one credential class every session
+  // running this pack demonstrably has on the machine, and the only one the
+  // original pattern set missed.
+  /sk-ant-[A-Za-z0-9_-]{16,}/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi,
+  /(?:api[_-]?key|password|secret|token)\s*[=:]\s*['"][^'"\s]{8,}['"]/gi,
 ];
 
 function stripSecrets(text) {
@@ -100,7 +286,23 @@ function nowISO() {
 // not reliable capture -- same class of limitation SECURITY_SPEC.md already
 // accepts for its own Bash coverage. Shared by review-gate-check.js and
 // design-lane-gate-check.js -- both treat a commit as their crisp trigger.
-const GIT_COMMIT_RE = /\bgit\b[^&|;\n]*\bcommit\b/i;
+//
+// `git` must sit in COMMAND position -- start of the string, or right after a
+// shell separator/whitespace -- and be followed by whitespace. The earlier
+// `\bgit\b` form matched the word anywhere, so ordinary Bash calls that merely
+// NAME a commit fired the gate: `cat docs/git-commit-pr.md` and any path
+// containing `git-commit` logged a MISS for a commit that never happened
+// (found 2026-08-27 by testing the matcher against real command strings rather
+// than reading it). A false MISS is the trust-eroding direction -- a gate that
+// cries wolf gets ignored, which costs more than the gate is worth.
+// Verified unbroken against the real commit shapes this pack itself mandates:
+// bash heredoc, PowerShell here-string (`git commit -m @'...'@`), `git -C <path>
+// commit`, `--amend`, `-am`, `rtk git commit`, and `cd x; git commit`.
+const GIT_COMMIT_RE = /(?:^|[\s;&|(])git\s[^&|;\n]*\bcommit\b/i;
+// ponytail: still text classification, so a command that quotes the words
+// (`echo "how to git commit"`) false-matches. Distinguishing that needs a real
+// shell parser -- not worth it for a non-blocking nudge. Upgrade path if it
+// ever matters: parse with a shell tokenizer, don't grow the regex.
 function isGitCommitCommand(command) {
   return GIT_COMMIT_RE.test(command || '');
 }
@@ -156,7 +358,14 @@ function acquireLock(lockPath, { staleMs = 10000, maxWaitMs = 250, retryDelayMs 
       fs.closeSync(fd);
       return true;
     } catch (err) {
-      if (err.code !== 'EEXIST') return false;
+      if (err.code !== 'EEXIST') {
+        // Not contention -- the lock file itself can't be created (unwritable
+        // directory, missing parent). Returning false here means every write
+        // this lock guards is skipped for as long as the condition lasts, so
+        // it can't stay silent.
+        recordHookError(err, `acquiring lock ${lockPath}`);
+        return false;
+      }
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleMs) {
@@ -175,8 +384,10 @@ function acquireLock(lockPath, { staleMs = 10000, maxWaitMs = 250, retryDelayMs 
 function releaseLock(lockPath) {
   try {
     fs.unlinkSync(lockPath);
-  } catch (_) {
-    /* already gone — fine */
+  } catch (err) {
+    // Already gone is fine. Anything else means the lock stays held until its
+    // stale timeout expires, blocking every write in between -- worth a line.
+    if (err.code !== 'ENOENT') recordHookError(err, `releasing lock ${lockPath}`);
   }
 }
 
@@ -189,8 +400,22 @@ function releaseLock(lockPath) {
 function atomicWrite(filePath, content) {
   const dir = path.dirname(filePath);
   const tmp = path.join(dir, `.${path.basename(filePath)}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`);
-  fs.writeFileSync(tmp, content, 'utf8');
-  fs.renameSync(tmp, filePath);
+  try {
+    fs.writeFileSync(tmp, content, 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    // A failed rename used to leave the scratch file behind forever, under a
+    // name nothing ever reads or cleans up (the suite asserts no leftovers
+    // after contention -- see test/run.sh Test 12). Clean up, then rethrow:
+    // deciding what a failed write means is the caller's fail-open catch's
+    // job, not this function's.
+    try {
+      fs.unlinkSync(tmp);
+    } catch (_) {
+      /* nothing written, or already gone */
+    }
+    throw err;
+  }
 }
 
 function withLock(lockPath, fn) {
@@ -254,6 +479,20 @@ function serializeCheckpoint(cp) {
 // memory-architecture.js. Index line format: "[STALE?] id | project | tags |
 // summary | path", one per note, flat file at <base>/architecture/index.md.
 
+// Note ids are read out of files that live INSIDE a repo (.claude/architecture/
+// index.md, .claude/architecture/watch-map.json), so on any cloned repo they are
+// attacker-controlled input, and every consumer turns an id straight into a
+// path (`<base>/architecture/notes/<id>.md`). Without this gate an id of
+// `../../../../.ssh/config` gets read and injected into the agent's context by
+// memory-recall.js/memory-architecture.js, and rewritten in place by
+// memory-architecture.js's staleness pass -- arbitrary file read and write from
+// nothing worse than `git clone`. Ids are opaque handles, so the allowlist is
+// deliberately narrow: no separators, no dots leading a traversal segment.
+const SAFE_NOTE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function isSafeNoteId(id) {
+  return typeof id === 'string' && SAFE_NOTE_ID_RE.test(id) && !id.includes('..');
+}
+
 function parseArchIndexLine(line) {
   const trimmed = (line || '').trim();
   if (!trimmed) return null;
@@ -262,7 +501,7 @@ function parseArchIndexLine(line) {
   const parts = body.split('|').map((p) => p.trim());
   if (parts.length < 5) return null;
   const [id, project, tags, summary, notePath] = parts;
-  if (!id) return null;
+  if (!isSafeNoteId(id)) return null;
   return { id, project, tags, summary, path: notePath, stale };
 }
 
@@ -310,12 +549,35 @@ function extractSection(body, header) {
 
 function readWatchMap(base) {
   const p = path.join(base, 'architecture', 'watch-map.json');
+  let raw;
   try {
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
+    raw = fs.readFileSync(p, 'utf8');
+  } catch (err) {
+    // No watch map at all is the normal state for an untracked repo.
+    if (err.code !== 'ENOENT') recordHookError(err, `reading ${p}`);
     return {};
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('watch-map.json is not an object');
+  } catch (err) {
+    // A hand-edited watch map that no longer parses silently disables every
+    // file-touch recall and every staleness flag in the repo -- the agent
+    // just stops seeing architecture notes, with no signal that it should.
+    recordHookError(err, `malformed ${p} -- file-touch recall disabled until fixed`);
+    return {};
+  }
+  // Note ids are read out of a file that lives INSIDE a repo, so on any
+  // cloned repo they are attacker-controlled input turned straight into a
+  // path by every consumer -- see isSafeNoteId's header comment.
+  const safe = {};
+  for (const [rel, ids] of Object.entries(parsed)) {
+    if (!Array.isArray(ids)) continue;
+    const kept = ids.filter(isSafeNoteId);
+    if (kept.length) safe[rel] = kept;
+  }
+  return safe;
 }
 
 // Prefixes the matching index line with "[STALE?] " (idempotent -- no-op if
@@ -356,9 +618,24 @@ function gatePaths(base, gateName) {
 }
 
 function readGateState(statePath) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch (_) {
+    raw = fs.readFileSync(statePath, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') recordHookError(err, `reading ${statePath}`);
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('gate state is not an object');
+    return parsed;
+  } catch (err) {
+    // Corrupt state used to collapse into {} and then get overwritten by this
+    // call's own writeGateState -- every unresolved miss in it gone, with no
+    // EXPIRED line and no trace, which is precisely what pruneIdleGateSessions'
+    // EXPIRED lines exist to prevent. Move the bytes aside and say so.
+    const kept = quarantineCorruptFile(statePath);
+    recordHookError(err, `corrupt gate state ${statePath}${kept ? ` (kept at ${kept})` : ''}`);
     return {};
   }
 }
@@ -367,17 +644,34 @@ function appendGateLog(dir, logPath, lockPath, lines) {
   if (!lines || !lines.length) return;
   ensureDir(dir);
   ensureGitignore(dir);
-  withLock(lockPath, () => {
-    fs.appendFileSync(logPath, lines.join('\n') + '\n');
+  const payload = lines.join('\n') + '\n';
+  const wrote = withLock(lockPath, () => {
+    fs.appendFileSync(logPath, payload);
   });
+  if (wrote) return;
+  // Contention: skipping is the right call for state.json (the next tool call
+  // rewrites it), but a MISS/EXPIRED line has no next chance -- dropping it
+  // silently loses the miss instead of closing it out. A single appendFileSync
+  // opens with O_APPEND, so a concurrent hook's line can interleave with this
+  // one but cannot corrupt it; that's strictly better than no line at all.
+  try {
+    fs.appendFileSync(logPath, payload);
+  } catch (err) {
+    recordHookError(err, `appending to ${logPath}`);
+  }
 }
 
 function writeGateState(dir, statePath, lockPath, state) {
   ensureDir(dir);
   ensureGitignore(dir);
-  withLock(lockPath, () => {
+  const wrote = withLock(lockPath, () => {
     atomicWrite(statePath, JSON.stringify(state));
   });
+  // Dropping a state write silently means the sticky flags this call just
+  // computed (reviewSeen, uiTouched, a fresh pending miss) never happened, and
+  // the gate quietly under-reports from here on. Not worth blocking a tool
+  // call over -- worth one line.
+  if (!wrote) recordHookError(new Error(`lock contended: ${lockPath}`), `gate state write skipped: ${statePath}`);
 }
 
 // Generic idle-session prune: any session whose lastSeen is older than ttlMs
@@ -389,8 +683,13 @@ function pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFi
   const cutoff = Date.now() - ttlMs;
   const expired = [];
   for (const id of Object.keys(state)) {
-    const seen = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
-    if (!Number.isNaN(cutoff) && seen < cutoff) {
+    const parsed = state[id] && state[id].lastSeen ? Date.parse(state[id].lastSeen) : 0;
+    // An unparseable lastSeen has to read as "infinitely idle," not as "never
+    // idle": Date.parse returns NaN, and `NaN < cutoff` is false, which made a
+    // session with a corrupt timestamp immortal -- its entry never pruned, its
+    // pending miss never closed out with an EXPIRED line.
+    const seen = Number.isFinite(parsed) ? parsed : 0;
+    if (seen < cutoff) {
       for (const field of pendingFields) {
         if (state[id] && state[id][field]) expired.push(describeExpired(id, field, state[id]));
       }
@@ -400,11 +699,63 @@ function pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFi
   appendGateLog(dir, logPath, lockPath, expired);
 }
 
+// Full gate-hook lifecycle, shared by canary-check.js/review-gate-check.js/
+// design-lane-gate-check.js/visual-plan-gate-check.js -- all 4 repeated the
+// same read-state/dispatch/touch-lastSeen/prune/write-state/emit-output
+// main() verbatim around their gate-specific logic. `shouldProcess` is the
+// optional cheap pre-check before any disk I/O (see design-lane-gate-check.js
+// for why); `handle(input, ctx)` does the gate-specific work against
+// ctx = { sessState, sessionId, dir, logPath, lockPath } and returns the
+// hook output object to emit, or null. Fail-open by construction: any throw
+// is swallowed here so a broken gate check never blocks the user's prompt or
+// tool call -- callers still own their trailing process.exit(0).
+function runGateHook({ gateName, defaultSessionState, ttlMs, pendingFields, describeExpired, shouldProcess, handle }) {
+  try {
+    const input = readHookInput();
+    if (shouldProcess && !shouldProcess(input)) return;
+
+    const cwd = input.cwd || process.cwd();
+    const sessionId = input.session_id || 'unknown';
+    // sessionId threaded through, not just cwd -- this is the whole point of
+    // the "one session, one scope" pin (see resolveScope's own header). Every
+    // gate hook this wrapper drives is exactly the class of hook the audit
+    // found split across two scopes by a mid-session `cd`; dropping the
+    // second argument here would silently re-open that finding for all of them.
+    const { base } = resolveScope(cwd, sessionId);
+    const { dir, statePath, logPath, lockPath } = gatePaths(base, gateName);
+
+    const state = readGateState(statePath);
+    const sessState = state[sessionId] || Object.assign({}, defaultSessionState);
+
+    const output = handle(input, { sessState, sessionId, dir, logPath, lockPath });
+
+    sessState.lastSeen = nowISO();
+    state[sessionId] = sessState;
+    pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFields, describeExpired });
+
+    writeGateState(dir, statePath, lockPath, state);
+
+    if (output) process.stdout.write(JSON.stringify(output));
+  } catch (err) {
+    // Fail open -- a broken gate check must never block the user's prompt or a
+    // real tool call. Recorded so a permanently-throwing gate can't masquerade
+    // as passing -- see recordHookError's header for why this matters: the
+    // failure path and the nothing-to-do path used to be byte-identical.
+    recordHookError(err, `${gateName} gate hook failed`);
+  }
+}
+
 module.exports = {
   readHookInput,
+  recordHookError,
+  readRecentHookErrors,
+  diagnosticsLogPath,
+  quarantineCorruptFile,
   homeDir,
   walkForGitRoot,
   resolveScope,
+  resolveScopeFromCwd,
+  sessionScopePath,
   ensureDir,
   ensureGitignore,
   stripSecrets,
@@ -422,10 +773,12 @@ module.exports = {
   architectureEntryMatches,
   extractSection,
   readWatchMap,
+  isSafeNoteId,
   flagIndexLineStale,
   gatePaths,
   readGateState,
   appendGateLog,
   writeGateState,
   pruneIdleGateSessions,
+  runGateHook,
 };

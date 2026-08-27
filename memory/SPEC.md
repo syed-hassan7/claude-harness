@@ -28,7 +28,38 @@ Two other assumptions in this design were checked, not just assumed, in the same
 | **Project** | cwd inside a git repo | `<repo>/.claude/session/checkpoint.md` | Last 10 checkpoints, 7 days max (matches the existing Cursor pattern in this repo) | Live checkpoint + compact archive index (paths + one-line summaries, not full archive contents) |
 | **Global** | cwd not in a repo (home, scratch dir) | `~/.claude/session/checkpoint.md` | Only the **last session** kept live; everything older rotates to archive | Live checkpoint only |
 
-Scope detection at `SessionStart`: walk cwd → ancestors for a `.git` directory. Found → project scope. Not found → global scope. (Same resolution shape as v4's `resolveHarnessRoot()` in `harness-lib.js`, minus the harness state it was resolving.)
+Scope detection at `SessionStart`: walk cwd → ancestors for a `.git` directory. Found → project scope. Not found → global scope. (Same resolution shape as v4's `resolveHarnessRoot()` in `harness-lib.js`, minus the harness state it was resolving.) The walk never counts the home directory itself — a git-tracked dotfiles home (`yadm`, `chezmoi`, bare `git init ~`) would otherwise collapse every global session into project scope.
+
+### One session, one scope — the pin (2026-08-27)
+
+**A session's scope is decided once, by the first hook to see its `session_id`, and reused for the
+rest of the session.** The decision is recorded at global scope in `~/.claude/session-scope.json`
+(`{ "<session_id>": { scope, base, repo, at } }`, pruned after 30 days idle) — global always,
+because that is the only location every scope can agree to look in.
+
+Why this is not just cwd resolution per call: **a hook's `input.cwd` is the Bash tool's *persisted*
+cwd, not the session's launch cwd.** One `cd` inside one Bash call therefore moved every later hook
+write into a different scope. External audit finding #5 proved it live — a real session's gate state
+landed inside a throwaway repo's `.claude/` after a `cd`, where it is effectively lost, and
+`memory-init.js` would then inject the wrong scope's checkpoint next session. A single session's
+gate, canary, and checkpoint state could be split across two or more directories purely as an
+artifact of directory navigation. Nothing in this document ever described mid-session scope
+migration, because it was never intended.
+
+In practice the pin comes from the true launch cwd: `SessionStart`'s `memory-init.js` is normally
+the first hook to see a session id. To deliberately re-pin, delete that session's entry.
+
+Two deliberate limits, both tested (`memory/hooks/test/run.sh`, Tests 66–69):
+
+- **Pinning never creates `<home>/.claude`.** `memory-init.js` is a pure read at `SessionStart` and
+  must leave no footprint on a home or repo with nothing to inject (Test 1). If that directory is
+  absent, Claude Code isn't installed there and no hook is running anyway — the pin is skipped and
+  behavior degrades to exactly the pre-fix cwd resolution.
+- **An id-less payload is never pinned.** All sessions lacking a `session_id` share the literal
+  `'unknown'` bucket; pinning that would collapse every such session onto one scope.
+
+`resolveScopeFromCwd(cwd)` remains exported for callers with no session id (tests, standalone
+tooling like `onboarding/verify.js`'s fallback path).
 
 ## Automatic triggers — hook table
 
@@ -401,11 +432,43 @@ Confirmed directly against Claude Code's own hooks docs: hook invocations for th
 - **`checkpoint.md`: the one file with real read-modify-write risk.** Lockfile via `O_CREAT|O_EXCL` + a stale-lock timeout, wrapping a temp-file-then-atomic-replace write (same `mclaude` pattern).
 - **Resolved:** the caveat this section originally raised was Git Bash `mv` behavior under contention on Windows, never independently verified. The shipped implementation sidesteps it rather than resolving it as originally framed — hooks run as native `node.exe`, not through Git Bash, so the write path is Node's `fs.renameSync` (Win32 `MoveFileExW`), not a shell `mv`. Verified empirically: 20 concurrent `node memory-checkpoint.js` processes racing the same lockfile + checkpoint file, repeated runs, valid output every time, no leftover lock or temp files. See `memory/hooks/_lib.js`'s `acquireLock`/`atomicWrite`.
 
+
+## Failure policy — fail open, but never fail silent (2026-08-27)
+
+Every hook here exits 0 unconditionally, by design: a broken memory or gate hook must never block a prompt, an Edit, a Write, or a compaction. The gap that policy left is that "the hook had nothing to say" and "the hook broke before it could say anything" produced byte-identical output — nothing — so a permanently broken hook looks exactly like a healthy idle one, indefinitely. Fail-open is kept; the silence is not.
+
+- **`recordHookError(err, context)` (`_lib.js`)** appends one line — timestamp, hook filename, context, first two stack frames — to `~/.claude/diagnostics/hook-errors.log`. Details go through the same `stripSecrets` path checkpoints use, since an error message can quote a file's contents. The log is capped at 64 KB and trimmed to its newest 200 lines, so a hook failing on every single `PostToolUse` cannot grow it without bound.
+- **Recording is itself best-effort and reentrancy-guarded.** A failure inside the recorder is swallowed (there is nowhere left to report it) and cannot recurse through the `ensureGitignore`/`atomicWrite` helpers it calls. Turning a recoverable hook error into a blocking one would defeat the point.
+- **`SessionStart` surfaces the rollup**: if any error was recorded in the last 7 days, `memory-init.js` injects a count, the most recent line, and the log path — same silent-when-clean rule as the canary and lesson-promotion nudges. This is the only place the log is read; nothing else acts on it.
+- **Expected absence is not an error.** A missing optional file (`ENOENT` on a checkpoint, plan file, watch-map, gate state) stays silent. Only unexpected read/write failures and malformed content are recorded — otherwise the log becomes noise and gets ignored, which is the same failure one layer up.
+- **Contended locks are recorded, not assumed successful.** `withLock` returning `false` means the write did not happen; callers now say so instead of dropping it. The one exception is `appendGateLog`, which retries the append outside the lock — an append-only audit line is safer duplicated than lost, and losing it means an unresolved gate miss disappears with no `EXPIRED` line.
+- **Corrupt gate state is quarantined, not overwritten.** Unparseable state used to read as `{}` and then get written over, silently destroying every unresolved miss it held. It is now renamed to `<file>.corrupt` and recorded, and the gate resumes from empty state.
+- **An unparseable `lastSeen` reads as idle.** `Date.parse` returning `NaN` made `NaN < cutoff` false, so a session with a corrupt timestamp was never pruned and its open miss never expired.
+
+
 ## Implementation notes (vs. the pseudocode above)
 
 `memory/hooks/*.js` follows this spec with two intentional, stated simplifications rather than silent scope-narrowing:
 
 - `goal`/`next`/`decisions`/`blockers` are **not** auto-refreshed from "recent assistant intent" the way `maybeRefresh(cp.next, recentAssistantIntent)` above sketches — a `PostToolUse` hook only receives `tool_input`, not conversation content, and parsing the transcript on every single Edit/Write was judged too much risk on the hottest-path hook in this repo. The hook mechanically keeps `files` and `updated` fresh; the agent edits `goal`/`next`/`decisions`/`blockers` directly when something material changes.
+
+  **Nudged, as of 2026-08-27.** "The agent edits them directly" held in project scope and did not
+  hold in global scope -- `WORKFLOW.md`'s Understand section predicted exactly that in its own text,
+  and the external audit then found a real injected checkpoint with `goal:` blank and nothing but
+  two filenames under `files:` (finding #2). An explicit written rule, real stakes (the next
+  session's injected context cannot answer "what were we doing" while still costing tokens), and
+  zero backstop -- the mechanization bar from `project_skill_mechanization_audit`. So
+  `memory-init.js` now emits a `## Claude Harness -- checkpoint had no goal` block whenever the
+  checkpoint it just injected has an empty or whitespace-only `goal:` field.
+
+  Folded into `memory-init.js`'s existing checkpoint read rather than built as a new hook, for
+  three reasons: it needs no `settings.json` wiring (an upgrade cost this pack has already made
+  users pay twice), it reuses a read that already happens, and `SessionStart` is the one moment the
+  agent is looking straight at the thin checkpoint while deciding what the session is about. It
+  cannot retroactively fill the previous session's `goal` -- nothing can -- it breaks the habit loop
+  that produced the empty field. Silent when a real `goal` is present, tested in both directions
+  (`memory/hooks/test/run.sh`, Test 70): a nudge that fires every session becomes noise and gets
+  tuned out, which is how a gate quietly stops working.
 - The lessons-index injection budget is a flat byte cap (8000 bytes, truncate-with-note past it), not the full priority-tiered scheme sketched in the Mistake-memory section below. Documented as a pragmatic first cut, not the final design.
 
 ## Security

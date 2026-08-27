@@ -59,6 +59,19 @@ reset='\033[0m'
 sep=" ${dim}│${reset} "
 
 # ── Helpers ─────────────────────────────────────────────
+# Everything interpolated into the final `printf "%b"` that comes from
+# outside this script -- the stdin payload, the checked-out branch name, the
+# caveman flag file -- goes through this first. `%b` expands backslash
+# escapes, so a branch named `\033[2J` or a model display name carrying a raw
+# ESC byte would otherwise paint arbitrary escape sequences into the user's
+# terminal (title rewriting, screen clearing, hidden text). Backslashes become
+# forward slashes rather than being dropped: on Windows the payload's cwd is
+# backslash-separated, and deleting them would silently glue path components
+# together in the directory field.
+sanitize_text() {
+    printf '%s' "$1" | tr -d '\000-\037\177' | tr '\\' '/'
+}
+
 color_for_pct() {
     local pct=$1
     if [ "$pct" -ge 70 ]; then printf "$red"
@@ -151,7 +164,7 @@ caveman_flag="$HOME/.claude/.caveman-active"
 if [ -f "$caveman_flag" ]; then
     caveman_mode=$(cat "$caveman_flag" 2>/dev/null | tr -d '[:space:]')
     if [ -n "$caveman_mode" ]; then
-        caveman_label=$(echo "$caveman_mode" | tr '[:lower:]' '[:upper:]')
+        caveman_label=$(sanitize_text "$caveman_mode" | tr '[:lower:]' '[:upper:]')
         caveman_badge="${magenta}[CAVEMAN:${caveman_label}]${reset}"
     fi
 fi
@@ -179,18 +192,19 @@ fi
 effort="default"
 settings_path="$HOME/.claude/settings.json"
 if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    effort=$(sanitize_text "$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)")
 fi
 
 # ── LINE 1: Model │ Caveman │ Context % │ Directory (branch) │ Session │ Effort ──
 pct_color=$(color_for_pct "$pct_used")
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
-dirname=$(basename "$cwd")
+model_name=$(sanitize_text "$model_name")
+dirname=$(sanitize_text "$(basename "$cwd")")
 
 git_branch=""
 git_dirty=""
 if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+    git_branch=$(sanitize_text "$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)")
     if [ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
         git_dirty="*"
     fi
@@ -265,9 +279,18 @@ if [ -n "$stdin_five_pct" ]; then
 fi
 
 # ── Fallback: API call (cached) ────────────────────────
-cache_file="/tmp/claude/statusline-usage-cache.json"
+# Per-user cache dir, 0700, NOT a shared world-writable path. The previous
+# location (/tmp/claude) is attacker-plantable on any multi-user machine: a
+# local attacker who creates /tmp/claude first owns the directory, so
+# `> "$cache_file"` follows a symlink they place there (arbitrary file
+# overwrite as this user) and whatever JSON they leave behind is what the
+# statusline renders.
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-harness"
+cache_file="$cache_dir/statusline-usage-cache.json"
 cache_max_age=60
-mkdir -p /tmp/claude
+mkdir -m 700 -p "$cache_dir" 2>/dev/null
+# Never read through / write through a symlink left in place of the cache.
+[ -L "$cache_file" ] && rm -f "$cache_file"
 
 usage_data=""
 extra_enabled="false"
@@ -311,12 +334,16 @@ if ! $has_stdin_rates; then
         fi
 
         if [ -n "$token" ] && [ "$token" != "null" ]; then
-            response=$(curl -s --max-time 5 \
+            # The OAuth token goes in via a config file on stdin, never on the
+            # command line: argv is world-readable through `ps` on Linux and
+            # macOS, so `-H "Authorization: Bearer $token"` leaks the token to
+            # every other local user for the lifetime of the request.
+            response=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s --max-time 5 \
                 -H "Accept: application/json" \
                 -H "Content-Type: application/json" \
-                -H "Authorization: Bearer $token" \
                 -H "anthropic-beta: oauth-2025-04-20" \
                 -H "User-Agent: claude-code/2.1.34" \
+                --config - \
                 "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
             if [ -n "$response" ] && echo "$response" | jq -e '.five_hour' >/dev/null 2>&1; then
                 usage_data="$response"
