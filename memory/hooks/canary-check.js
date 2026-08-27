@@ -166,7 +166,10 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  // Fail open -- a broken canary check must never block the user's prompt.
+} catch (err) {
+  // Fail open -- a broken canary check must never block the user's prompt. A
+  // gate that throws every time is a dead gate, the exact failure class this
+  // file's own header describes, so record it.
+  lib.recordHookError(err, 'canary-check failed');
 }
 process.exit(0);

@@ -78,7 +78,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  // Fail open: a broken recall lookup must never block the user's prompt.
+} catch (err) {
+  // Fail open: a broken recall lookup must never block the user's prompt --
+  // but silently recalling nothing, forever, is the failure this records.
+  lib.recordHookError(err, 'memory-recall failed');
 }
 process.exit(0);

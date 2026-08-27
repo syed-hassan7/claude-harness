@@ -11,7 +11,7 @@
 #
 # Drift canary applies to this file — see WORKFLOW.md's "Drift canary" note.
 
-version: "6.4.0"
+version: "6.5.0"
 
 skills:
   # ── Engineering (always on) ────────────────────────────────────────────

@@ -97,7 +97,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Fail open -- a broken review-gate check must never block a real tool call.
+  // Recorded so a permanently-throwing gate can't masquerade as a passing one.
+  lib.recordHookError(err, 'review-gate-check failed');
 }
 process.exit(0);

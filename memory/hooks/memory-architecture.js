@@ -84,8 +84,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Fail open: a broken recall/staleness pass must never block the tool call --
   // PostToolUse fires after the tool already ran, same posture as memory-checkpoint.js.
+  lib.recordHookError(err, 'memory-architecture failed');
 }
 process.exit(0);

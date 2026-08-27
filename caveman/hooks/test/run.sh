@@ -97,6 +97,39 @@ run_tracker "quoting the user: 'please stop caveman for John's demo'"
 [ -f "$FLAG_FILE" ] || fail "flag should survive -- this is a quoted mention, the possessive apostrophe in John's should not have aborted the strip"
 pass "a genuine quoted span with a possessive apostrophe before its closing quote is still stripped"
 
+echo "=== Test 13: a malformed caveman config warns on stderr instead of silently becoming 'full' ==="
+# Falling back to 'full' is correct -- nothing here may block a session start --
+# but doing it silently makes a broken config indistinguishable from a config
+# that genuinely asked for 'full'.
+CFG_HOME="$WORK/cfg"
+mkdir -p "$CFG_HOME/caveman"
+printf '{ "defaultMode": "lite"' > "$CFG_HOME/caveman/config.json"
+CFG_ERR="$WORK/cfg.err"
+MODE=$(XDG_CONFIG_HOME="$(win_path "$CFG_HOME")" CAVEMAN_DEFAULT_MODE= node -e "
+  process.stdout.write(require('$HOOKS/caveman-config').getDefaultMode());
+" 2> "$CFG_ERR")
+[ "$MODE" = "full" ] || fail "expected the documented 'full' fallback for an unusable config, got: $MODE"
+grep -q 'malformed JSON' "$CFG_ERR" || fail "malformed config produced no diagnostic on stderr, got: $(cat "$CFG_ERR")"
+pass "a malformed config falls back to 'full' AND says why on stderr"
+
+echo "=== Test 14: an unknown defaultMode is reported, not silently ignored ==="
+printf '{ "defaultMode": "ultraa" }' > "$CFG_HOME/caveman/config.json"
+MODE=$(XDG_CONFIG_HOME="$(win_path "$CFG_HOME")" CAVEMAN_DEFAULT_MODE= node -e "
+  process.stdout.write(require('$HOOKS/caveman-config').getDefaultMode());
+" 2> "$CFG_ERR")
+[ "$MODE" = "full" ] || fail "expected 'full' fallback for an unknown mode name, got: $MODE"
+grep -q 'unknown defaultMode' "$CFG_ERR" || fail "a typo'd mode name produced no diagnostic, got: $(cat "$CFG_ERR")"
+pass "a typo'd defaultMode is named on stderr instead of looking like no configuration at all"
+
+echo "=== Test 15: a missing config stays quiet -- it is the normal, expected state ==="
+rm -f "$CFG_HOME/caveman/config.json"
+MODE=$(XDG_CONFIG_HOME="$(win_path "$CFG_HOME")" CAVEMAN_DEFAULT_MODE= node -e "
+  process.stdout.write(require('$HOOKS/caveman-config').getDefaultMode());
+" 2> "$CFG_ERR")
+[ "$MODE" = "full" ] || fail "expected 'full' with no config present, got: $MODE"
+[ -s "$CFG_ERR" ] && fail "no config file is the default state and must not warn, got: $(cat "$CFG_ERR")"
+pass "an absent config file produces no noise"
+
 echo ""
 echo "ALL $PASS_COUNT CHECKS PASSED"
 

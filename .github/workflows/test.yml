@@ -11,7 +11,10 @@ name: test
 on: [push, pull_request]
 
 jobs:
-  memory-and-statusline-tests:
+  # The caveman + onboarding suites existed but were never wired in here, so
+  # every failure they could catch was invisible until someone ran them by
+  # hand -- a suite nothing runs is the same silent no-op as a swallowed error.
+  hook-tests:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
@@ -24,3 +27,9 @@ jobs:
       - name: statusline test suite
         shell: bash
         run: bash statusline/test.sh
+      - name: caveman hooks test suite
+        shell: bash
+        run: bash caveman/hooks/test/run.sh
+      - name: onboarding test suite
+        shell: bash
+        run: bash onboarding/test/run.sh

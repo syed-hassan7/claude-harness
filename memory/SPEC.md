@@ -401,6 +401,18 @@ Confirmed directly against Claude Code's own hooks docs: hook invocations for th
 - **`checkpoint.md`: the one file with real read-modify-write risk.** Lockfile via `O_CREAT|O_EXCL` + a stale-lock timeout, wrapping a temp-file-then-atomic-replace write (same `mclaude` pattern).
 - **Resolved:** the caveat this section originally raised was Git Bash `mv` behavior under contention on Windows, never independently verified. The shipped implementation sidesteps it rather than resolving it as originally framed — hooks run as native `node.exe`, not through Git Bash, so the write path is Node's `fs.renameSync` (Win32 `MoveFileExW`), not a shell `mv`. Verified empirically: 20 concurrent `node memory-checkpoint.js` processes racing the same lockfile + checkpoint file, repeated runs, valid output every time, no leftover lock or temp files. See `memory/hooks/_lib.js`'s `acquireLock`/`atomicWrite`.
 
+## Failure policy — fail open, but never fail silent (2026-08-27)
+
+Every hook here exits 0 unconditionally, by design: a broken memory or gate hook must never block a prompt, an Edit, a Write, or a compaction. The gap that policy left is that "the hook had nothing to say" and "the hook broke before it could say anything" produced byte-identical output — nothing — so a permanently broken hook looks exactly like a healthy idle one, indefinitely. Fail-open is kept; the silence is not.
+
+- **`recordHookError(err, context)` (`_lib.js`)** appends one line — timestamp, hook filename, context, first two stack frames — to `~/.claude/diagnostics/hook-errors.log`. Details go through the same `stripSecrets` path checkpoints use, since an error message can quote a file's contents. The log is capped at 64 KB and trimmed to its newest 200 lines, so a hook failing on every single `PostToolUse` cannot grow it without bound.
+- **Recording is itself best-effort and reentrancy-guarded.** A failure inside the recorder is swallowed (there is nowhere left to report it) and cannot recurse through the `ensureGitignore`/`atomicWrite` helpers it calls. Turning a recoverable hook error into a blocking one would defeat the point.
+- **`SessionStart` surfaces the rollup**: if any error was recorded in the last 7 days, `memory-init.js` injects a count, the most recent line, and the log path — same silent-when-clean rule as the canary and lesson-promotion nudges. This is the only place the log is read; nothing else acts on it.
+- **Expected absence is not an error.** A missing optional file (`ENOENT` on a checkpoint, plan file, watch-map, gate state) stays silent. Only unexpected read/write failures and malformed content are recorded — otherwise the log becomes noise and gets ignored, which is the same failure one layer up.
+- **Contended locks are recorded, not assumed successful.** `withLock` returning `false` means the write did not happen; callers now say so instead of dropping it. The one exception is `appendGateLog`, which retries the append outside the lock — an append-only audit line is safer duplicated than lost, and losing it means an unresolved gate miss disappears with no `EXPIRED` line.
+- **Corrupt gate state is quarantined, not overwritten.** Unparseable state used to read as `{}` and then get written over, silently destroying every unresolved miss it held. It is now renamed to `<file>.corrupt` and recorded, and the gate resumes from empty state.
+- **An unparseable `lastSeen` reads as idle.** `Date.parse` returning `NaN` made `NaN < cutoff` false, so a session with a corrupt timestamp was never pruned and its open miss never expired.
+
 ## Implementation notes (vs. the pseudocode above)
 
 `memory/hooks/*.js` follows this spec with two intentional, stated simplifications rather than silent scope-narrowing:

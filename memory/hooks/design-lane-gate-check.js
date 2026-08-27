@@ -151,7 +151,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  // Fail open -- a broken design-lane gate check must never block a real tool call.
+} catch (err) {
+  // Fail open -- a broken design-lane gate check must never block a real tool
+  // call. Recorded so a permanently-throwing gate can't masquerade as passing.
+  lib.recordHookError(err, 'design-lane-gate-check failed');
 }
 process.exit(0);

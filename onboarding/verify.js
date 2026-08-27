@@ -24,10 +24,21 @@ function cavemanConfigPath() {
   return path.join(dir, 'config.json');
 }
 
+// A verifier that reports "not wired" when it simply couldn't look is lying in
+// the reassuring direction -- the same failure class this file's ponytail block
+// was added to close. Every unreadable probe below says so on stderr, so an
+// all-"missing" report caused by a permissions problem can't be mistaken for a
+// genuinely incomplete install.
+function warn(message) {
+  process.stderr.write(`[claude-harness] verify: ${message}\n`);
+}
+
 function settingsContains(needle) {
   try {
     return fs.readFileSync(SETTINGS_PATH, 'utf8').includes(needle);
-  } catch (_) {
+  } catch (err) {
+    // No settings.json at all is a legitimate pre-wiring state.
+    if (err.code !== 'ENOENT') warn(`cannot read ${SETTINGS_PATH} (${err.code || err.message}) -- wiring checks below report as not-wired`);
     return false;
   }
 }
@@ -35,7 +46,8 @@ function settingsContains(needle) {
 function exists(p) {
   try {
     return fs.existsSync(p);
-  } catch (_) {
+  } catch (err) {
+    warn(`cannot stat ${p} (${err.code || err.message}) -- treating as absent`);
     return false;
   }
 }
@@ -79,16 +91,23 @@ const results = [];
   const dirPresent = exists(path.join(PACK_DIR, 'caveman'));
   const cfgPath = cavemanConfigPath();
   let cfgHasMode = false;
+  let cfgError = null;
   try {
-    cfgHasMode = !!JSON.parse(fs.readFileSync(cfgPath, 'utf8')).defaultMode;
-  } catch (_) {
-    cfgHasMode = false;
+    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfgHasMode = !!(parsed && parsed.defaultMode);
+    if (!cfgHasMode) cfgError = 'no defaultMode field';
+  } catch (err) {
+    // "Not there yet" and "there but broken" both block activation, but only one
+    // of them is fixed by re-running the installer -- say which this is.
+    cfgError = err.code === 'ENOENT' ? null : `unreadable/malformed (${err.code || err.message})`;
   }
   const wired = settingsContains('caveman-activate.js');
   let status, detail;
   if (!dirPresent || !cfgHasMode) {
     status = 'missing';
-    detail = !dirPresent ? 'caveman/ not installed' : `config missing defaultMode at ${cfgPath}`;
+    detail = !dirPresent
+      ? 'caveman/ not installed'
+      : `config ${cfgError || 'missing'} at ${cfgPath}`;
   } else if (!wired) {
     status = 'pending-manual-paste';
     detail = `files + config ok, settings.json not yet updated (see install.sh output)`;

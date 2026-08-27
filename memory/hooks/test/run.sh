@@ -952,6 +952,132 @@ run_hook visual-plan-gate-check.js "$VPG64_PROJECT" '{"cwd":"'"$VPG64_PROJECT"'"
 [ -d "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" ] && fail "a Read on an unrelated file should never create the state dir at all: $(ls "$VPG64_PROJECT_POSIX/.claude/visual-plan-gate" 2>/dev/null)"
 pass "visual-plan-gate-check.js skips all state I/O for a tool call that could not change either flag"
 
+echo "=== Test 65: an unparseable hook payload is recorded, not silently treated as an empty one ==="
+# Every hook here is fail-open by contract, which means a payload shape that
+# stopped parsing degrades into a permanent silent no-op -- indistinguishable
+# from "nothing to do". Exit 0 must survive; silence must not.
+D65_HOME_POSIX="$WORK/diag65_home"
+mkdir -p "$D65_HOME_POSIX"
+D65_HOME=$(win_path "$D65_HOME_POSIX")
+D65_CWD_POSIX="$WORK/diag65_cwd"
+mkdir -p "$D65_CWD_POSIX"
+D65_CWD=$(win_path "$D65_CWD_POSIX")
+CLAUDE_HARNESS_HOME_OVERRIDE="$D65_HOME" run_hook memory-checkpoint.js "$D65_CWD" '{"cwd":"not closed' > /dev/null \
+  || fail "a malformed payload must still exit 0 -- fail-open is not negotiable"
+D65_LOG="$D65_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+[ -f "$D65_LOG" ] || fail "malformed payload left no diagnostic record at $D65_LOG"
+grep -q 'unparseable hook payload' "$D65_LOG" || fail "diagnostic recorded but not identifiable as a payload-parse failure: $(cat "$D65_LOG")"
+grep -q 'memory-checkpoint.js' "$D65_LOG" || fail "diagnostic does not name the hook that failed: $(cat "$D65_LOG")"
+pass "an unparseable hook payload still exits 0 but leaves an attributable diagnostic"
+
+echo "=== Test 66: SessionStart surfaces recent hook errors, and stays silent about stale ones ==="
+D66_HOME_POSIX="$WORK/diag66_home"
+mkdir -p "$D66_HOME_POSIX/.claude/diagnostics"
+D66_HOME=$(win_path "$D66_HOME_POSIX")
+D66_CWD_POSIX="$WORK/diag66_cwd"
+mkdir -p "$D66_CWD_POSIX"
+D66_CWD=$(win_path "$D66_CWD_POSIX")
+D66_LOG="$D66_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+printf '%s | memory-compact.js | memory-compact failed | Error: EACCES\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > "$D66_LOG"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$D66_HOME" run_hook memory-init.js "$D66_CWD" '{"cwd":"'"$D66_CWD"'","session_id":"d66"}')
+echo "$OUT" | grep -q 'memory hook errors' || fail "SessionStart did not surface a recent hook error at all, got: $OUT"
+echo "$OUT" | grep -q 'memory-compact failed' || fail "rollup surfaced no identifying detail from the recorded error, got: $OUT"
+# Older than the 7-day window: a problem that was already fixed must stop being
+# reported, same silence-when-clean rule as the canary rollup.
+printf '2020-01-01T00:00:00.000Z | memory-compact.js | memory-compact failed | Error: EACCES\n' > "$D66_LOG"
+OUT=$(CLAUDE_HARNESS_HOME_OVERRIDE="$D66_HOME" run_hook memory-init.js "$D66_CWD" '{"cwd":"'"$D66_CWD"'","session_id":"d66b"}')
+echo "$OUT" | grep -q 'memory hook errors' && fail "a hook error well outside the reporting window must not be surfaced, got: $OUT"
+pass "SessionStart reports recent hook errors and drops ones outside the window"
+
+echo "=== Test 67: corrupt gate state is quarantined, not silently overwritten ==="
+# Reading corrupt state as {} and then writing over it destroys every unresolved
+# miss in the file with no EXPIRED line and no trace -- the exact loss
+# pruneIdleGateSessions' EXPIRED lines exist to prevent.
+D67_PROJECT_POSIX="$WORK/diag67_project"
+mkdir -p "$D67_PROJECT_POSIX/.claude/canary"
+(cd "$D67_PROJECT_POSIX" && git init -q)
+D67_PROJECT=$(win_path "$D67_PROJECT_POSIX")
+D67_STATE="$D67_PROJECT_POSIX/.claude/canary/state.json"
+printf '{"sX":{"pending":{"file":"WORKFLOW.md"' > "$D67_STATE"
+run_hook canary-check.js "$D67_PROJECT" '{"cwd":"'"$D67_PROJECT"'","session_id":"sY"}' > /dev/null \
+  || fail "corrupt gate state must not stop the hook from exiting 0"
+[ -f "$D67_STATE.corrupt" ] || fail "corrupt state was overwritten instead of preserved at $D67_STATE.corrupt"
+grep -q 'WORKFLOW.md' "$D67_STATE.corrupt" || fail "quarantined file does not contain the original bytes: $(cat "$D67_STATE.corrupt")"
+node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$D67_STATE" \
+  || fail "hook did not write a valid replacement state file"
+grep -q 'corrupt gate state' "$D67_PROJECT_POSIX/.claude/diagnostics/hook-errors.log" 2>/dev/null \
+  || grep -q 'corrupt gate state' "$FAKE_HOME_POSIX/.claude/diagnostics/hook-errors.log" \
+  || fail "corrupt state was quarantined but never recorded as an error"
+pass "corrupt gate state is quarantined and recorded, and the gate keeps working"
+
+echo "=== Test 68: a session whose lastSeen is unparseable still gets pruned and closed out ==="
+# Date.parse of a corrupt timestamp is NaN, and `NaN < cutoff` is false -- which
+# made such a session immortal: never pruned, its open miss never EXPIRED.
+D68_PROJECT_POSIX="$WORK/diag68_project"
+mkdir -p "$D68_PROJECT_POSIX/.claude/canary"
+(cd "$D68_PROJECT_POSIX" && git init -q)
+D68_PROJECT=$(win_path "$D68_PROJECT_POSIX")
+printf '{"stale":{"offset":0,"pending":{"file":"WORKFLOW.md","at":"whenever"},"lastSeen":"not-a-timestamp"}}' \
+  > "$D68_PROJECT_POSIX/.claude/canary/state.json"
+run_hook canary-check.js "$D68_PROJECT" '{"cwd":"'"$D68_PROJECT"'","session_id":"fresh"}' > /dev/null
+grep -q 'EXPIRED' "$D68_PROJECT_POSIX/.claude/canary/log.md" || fail "no EXPIRED line logged for the pruned session: $(cat "$D68_PROJECT_POSIX/.claude/canary/log.md" 2>/dev/null)"
+node -e "
+  const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+  if (s.stale) { console.error('session with a corrupt lastSeen survived pruning'); process.exit(1); }
+" "$D68_PROJECT_POSIX/.claude/canary/state.json" || fail "session with an unparseable lastSeen was never pruned"
+pass "an unparseable lastSeen reads as idle: the session is pruned and its open miss logged EXPIRED"
+
+echo "=== Test 69: a malformed watch-map is recorded instead of silently disabling file-touch recall ==="
+D69_PROJECT_POSIX="$WORK/diag69_project"
+mkdir -p "$D69_PROJECT_POSIX/.claude/architecture"
+(cd "$D69_PROJECT_POSIX" && git init -q)
+D69_PROJECT=$(win_path "$D69_PROJECT_POSIX")
+D69_HOME_POSIX="$WORK/diag69_home"
+mkdir -p "$D69_HOME_POSIX"
+D69_HOME=$(win_path "$D69_HOME_POSIX")
+printf '{"src/app.js": [' > "$D69_PROJECT_POSIX/.claude/architecture/watch-map.json"
+CLAUDE_HARNESS_HOME_OVERRIDE="$D69_HOME" run_hook memory-architecture.js "$D69_PROJECT" '{"cwd":"'"$D69_PROJECT"'","tool_name":"Read","tool_input":{"file_path":"'"$D69_PROJECT"'/src/app.js"}}' > /dev/null \
+  || fail "a malformed watch-map must not stop the hook from exiting 0"
+grep -q 'malformed' "$D69_HOME_POSIX/.claude/diagnostics/hook-errors.log" \
+  || fail "malformed watch-map left no diagnostic: $(cat "$D69_HOME_POSIX/.claude/diagnostics/hook-errors.log" 2>/dev/null)"
+pass "a malformed watch-map.json is recorded rather than silently disabling recall"
+
+echo "=== Test 70: the diagnostics log is bounded -- a permanently failing hook cannot grow it forever ==="
+D70_HOME_POSIX="$WORK/diag70_home"
+mkdir -p "$D70_HOME_POSIX/.claude/diagnostics"
+D70_HOME=$(win_path "$D70_HOME_POSIX")
+D70_CWD_POSIX="$WORK/diag70_cwd"
+mkdir -p "$D70_CWD_POSIX"
+D70_CWD=$(win_path "$D70_CWD_POSIX")
+D70_LOG="$D70_HOME_POSIX/.claude/diagnostics/hook-errors.log"
+node -e "
+  const fs = require('fs');
+  const line = new Array(200).join('x');
+  fs.writeFileSync(process.argv[1], Array.from({ length: 2000 }, (_, i) => '2026-01-01T00:00:00.000Z | pad | pad ' + i + ' | ' + line).join('\n') + '\n');
+" "$D70_LOG"
+CLAUDE_HARNESS_HOME_OVERRIDE="$D70_HOME" run_hook memory-checkpoint.js "$D70_CWD" '{"cwd":"broken' > /dev/null
+D70_SIZE=$(node -e "process.stdout.write(String(require('fs').statSync(process.argv[1]).size))" "$D70_LOG")
+[ "$D70_SIZE" -le 65536 ] || fail "diagnostics log was not trimmed back under its cap, size is $D70_SIZE"
+grep -q 'unparseable hook payload' "$D70_LOG" || fail "trim dropped the newest entry -- the one that just happened: $(tail -1 "$D70_LOG")"
+pass "the diagnostics log stays under its size cap and keeps the newest entries"
+
+echo "=== Test 71: a failed atomic write leaves no temp file behind ==="
+# atomicWrite used to leak its scratch file on a failed rename, under a name
+# nothing reads or cleans up. Forced here by making the rename target a
+# directory, which no write can replace.
+D71_DIR_POSIX="$WORK/diag71"
+mkdir -p "$D71_DIR_POSIX/target.md"
+node -e "
+  const lib = require(process.argv[1] + '/_lib.js');
+  const target = process.argv[2] + '/target.md';
+  let threw = false;
+  try { lib.atomicWrite(target, 'content'); } catch (_) { threw = true; }
+  if (!threw) { console.error('atomicWrite silently succeeded against an unwritable target'); process.exit(1); }
+  const leftover = require('fs').readdirSync(process.argv[2]).filter((f) => f.includes('.tmp.'));
+  if (leftover.length) { console.error('leftover temp file(s): ' + leftover.join(', ')); process.exit(1); }
+" "$HOOKS_WIN" "$(win_path "$D71_DIR_POSIX")" || fail "atomicWrite either swallowed the failure or leaked a temp file"
+pass "a failed atomicWrite propagates the error to its caller and cleans up its temp file"
+
 echo ""
 echo "=== Test 13: real ~/.claude/session gains no NEW files from this run ==="
 POST_SESSION_SNAPSHOT="$(find ~/.claude/session -type f 2>/dev/null | sort)" || true

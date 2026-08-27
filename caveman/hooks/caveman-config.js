@@ -19,6 +19,21 @@ const VALID_MODES = [
   'commit', 'review', 'compress'
 ];
 
+// These hooks are fail-open by contract -- none of them may block a session
+// start or a prompt -- but fail-open is not fail-silent: a mode that silently
+// resolves to 'full' because the config is malformed is indistinguishable from
+// one the user actually asked for. stderr is the channel here rather than
+// memory/hooks/_lib.js's diagnostics log, because the caveman tier installs
+// standalone (as a plugin, without memory/) and must not depend on it; Claude
+// Code captures hook stderr in its debug output.
+function warn(message) {
+  try {
+    process.stderr.write(`caveman: ${message}\n`);
+  } catch (_) {
+    /* stderr closed -- nothing left to report to */
+  }
+}
+
 function getConfigDir() {
   if (process.env.XDG_CONFIG_HOME) {
     return path.join(process.env.XDG_CONFIG_HOME, 'caveman');
@@ -44,18 +59,30 @@ function getDefaultMode() {
   }
 
   // 2. Config file
+  const configPath = getConfigPath();
+  let raw = null;
   try {
-    const configPath = getConfigPath();
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (config.defaultMode && VALID_MODES.includes(config.defaultMode.toLowerCase())) {
-      return config.defaultMode.toLowerCase();
-    }
+    raw = fs.readFileSync(configPath, 'utf8');
   } catch (e) {
-    // Config file doesn't exist or is invalid — fall through
+    // No config file is the normal, expected case -- anything else (permissions,
+    // an unreadable mount) means the user's configured mode is being ignored.
+    if (e.code !== 'ENOENT') warn(`cannot read ${configPath} (${e.code || e.message}) -- falling back to 'full'`);
+  }
+  if (raw !== null) {
+    try {
+      const config = JSON.parse(raw);
+      const configured = config && typeof config.defaultMode === 'string' ? config.defaultMode.toLowerCase() : null;
+      if (configured && VALID_MODES.includes(configured)) return configured;
+      // Present but unusable: silently returning 'full' here is how a typo'd
+      // mode name looks exactly like no configuration at all.
+      if (configured) warn(`unknown defaultMode "${configured}" in ${configPath} -- falling back to 'full'`);
+    } catch (e) {
+      warn(`malformed JSON in ${configPath} (${e.message}) -- falling back to 'full'`);
+    }
   }
 
   // 3. Default
   return 'full';
 }
 
-module.exports = { getDefaultMode, getConfigDir, getConfigPath, VALID_MODES };
+module.exports = { getDefaultMode, getConfigDir, getConfigPath, warn, VALID_MODES };

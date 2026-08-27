@@ -19,6 +19,11 @@ const LESSONS_INDEX_CAP_BYTES = 8000; // pragmatic cap, see memory/SPEC.md's
 const PROJECT_ARCH_CAP_BYTES = 8000;
 const GLOBAL_ARCH_CAP_BYTES = 2000;
 
+// How far back the hook-error rollup below looks. Long enough that a failure
+// which only fires on PreCompact or SessionEnd is still visible next session,
+// short enough that a fixed problem stops being reported.
+const HOOK_ERROR_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 function main() {
   const input = lib.readHookInput();
   const cwd = input.cwd || process.cwd();
@@ -53,9 +58,10 @@ function main() {
         try {
           fs.copyFileSync(cpPath, path.join(archiveDir, `${ts}.md`));
           fs.unlinkSync(cpPath);
-        } catch (_) {
+        } catch (err) {
           /* best-effort rotation — a missed rotation just means one stale
              read next session, not data loss */
+          lib.recordHookError(err, `rotating ${cpPath} into ${archiveDir}`);
         }
       }
     }
@@ -103,9 +109,10 @@ function main() {
           try {
             const state = JSON.parse(fs.readFileSync(promotionStatePath, 'utf8'));
             lastReviewedAt = state && typeof state.lastReviewedAt === 'string' ? state.lastReviewedAt : null;
-          } catch (_) {
+          } catch (err) {
             /* malformed state file -- treat as never-reviewed (fail toward
                nudging, not toward silence), never block SessionStart over it */
+            lib.recordHookError(err, `malformed ${promotionStatePath}`);
           }
         }
         // NaN-safe by construction: Date.parse of a missing/malformed watermark
@@ -125,7 +132,8 @@ function main() {
             'ritual and memory/SPEC.md\'s "Lesson-promotion memory" section.';
           parts.push('## Claude Harness — lesson promotion review\n\n' + msg);
         }
-      } catch (_) {
+      } catch (err) {
+        lib.recordHookError(err, 'lesson-promotion review nudge');
         // A transient stat/read failure here (e.g. the index file vanishing
         // between the readFileSync above and this statSync -- external
         // delete, AV scan, a sync-engine lock) must never abort main(): the
@@ -182,9 +190,27 @@ function main() {
           `## Claude Harness — drift canary\n\n${openCount} open naming-miss${openCount === 1 ? '' : 'es'} across recent sessions — see ${canaryLogPath}`
         );
       }
-    } catch (_) {
-      /* malformed state file -- skip the rollup, never block SessionStart over it */
+    } catch (err) {
+      /* malformed state file -- skip the rollup, never block SessionStart over
+         it. Recorded: a corrupt canary state silently disables the rollup,
+         which reads identically to "no open misses" -- the reassuring answer. */
+      lib.recordHookError(err, `malformed ${canaryStatePath}`);
     }
+  }
+
+  // Hook-error rollup -- the read side of _lib.js's diagnostics channel. Every
+  // hook here is fail-open by contract, so a hook that throws on every single
+  // invocation produces exactly the same user-visible result as one with
+  // nothing to do: silence. This is the one place per session that says
+  // otherwise. Silent when clean, same context-economy rule as the canary
+  // rollup above.
+  const hookErrors = lib.readRecentHookErrors(HOOK_ERROR_WINDOW_MS);
+  if (hookErrors.count) {
+    parts.push(
+      `## Claude Harness — memory hook errors\n\n` +
+        `${hookErrors.count} hook error${hookErrors.count === 1 ? '' : 's'} recorded in the last 7 days — memory/gate hooks fail open, so some of this session's memory may be silently missing. Full log: ${hookErrors.path}\n\n` +
+        `Most recent: ${hookErrors.latest}`
+    );
   }
 
   if (parts.length) {
@@ -202,7 +228,10 @@ function main() {
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Never let a memory-hook failure surface to the user or block session start.
+  // Recorded so the next session's rollup above can report it -- including a
+  // failure of this hook itself.
+  lib.recordHookError(err, 'memory-init failed');
 }
 process.exit(0);

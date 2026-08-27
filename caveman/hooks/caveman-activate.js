@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { getDefaultMode } = require('./caveman-config');
+const { getDefaultMode, warn } = require('./caveman-config');
 
 const claudeDir = path.join(os.homedir(), '.claude');
 const flagPath = path.join(claudeDir, '.caveman-active');
@@ -19,7 +19,13 @@ const mode = getDefaultMode();
 
 // "off" mode — skip activation entirely, don't write flag or emit rules
 if (mode === 'off') {
-  try { fs.unlinkSync(flagPath); } catch (e) {}
+  try {
+    fs.unlinkSync(flagPath);
+  } catch (e) {
+    // No flag to clear is the expected case; a flag that CAN'T be cleared means
+    // the statusline keeps advertising a mode that is not active.
+    if (e.code !== 'ENOENT') warn(`cannot clear ${flagPath} (${e.code || e.message})`);
+  }
   process.stdout.write('OK');
   process.exit(0);
 }
@@ -29,7 +35,10 @@ try {
   fs.mkdirSync(path.dirname(flagPath), { recursive: true });
   fs.writeFileSync(flagPath, mode);
 } catch (e) {
-  // Silent fail -- flag is best-effort, don't block the hook
+  // Best-effort, never blocking -- but the statusline badge reads this file, so
+  // a failure here shows up to the user as "the mode didn't activate" with no
+  // other explanation available anywhere.
+  warn(`cannot write flag ${flagPath} (${e.code || e.message}) -- statusline badge will not show the active mode`);
 }
 
 // 2. Emit full caveman ruleset, filtered to the active intensity level.
@@ -60,7 +69,12 @@ try {
   skillContent = fs.readFileSync(
     path.join(__dirname, '..', 'skills', 'caveman', 'SKILL.md'), 'utf8'
   );
-} catch (e) { /* standalone install — will use fallback below */ }
+} catch (e) {
+  // A missing SKILL.md is the expected standalone-install case (fallback rules
+  // below). An unreadable one silently downgrades every session to the reduced
+  // ruleset, which is not something the user would otherwise notice.
+  if (e.code !== 'ENOENT') warn(`cannot read SKILL.md (${e.code || e.message}) -- using fallback ruleset`);
+}
 
 let output;
 
@@ -142,7 +156,10 @@ try {
       "Proactively offer to set this up for the user on first interaction.";
   }
 } catch (e) {
-  // Silent fail — don't block session start over statusline detection
+  // Don't block session start over statusline detection. A malformed
+  // settings.json lands here, and the nudge it suppresses is the only thing
+  // that would have told the user their statusline isn't wired up.
+  warn(`cannot check statusline config in ${settingsPath} (${e.message}) -- skipping setup nudge`);
 }
 
 process.stdout.write(output);

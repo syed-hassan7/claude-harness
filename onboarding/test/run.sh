@@ -33,8 +33,14 @@ run_install() {
 }
 
 run_verify_json() {
-  # run_verify_json <target>
-  CLAUDE_HARNESS_TARGET="$1" node "$1/claude-harness/onboarding/verify.js" --json
+  # run_verify_json <target> <cfg_home>
+  # XDG_CONFIG_HOME must be sandboxed here too, not just for install.sh: verify.js
+  # resolves caveman's config dir the same way install.sh does, so without it the
+  # verifier reads the REAL ~/.config/caveman/config.json and reports the caveman
+  # tier based on the dev machine's own state rather than the scratch install's --
+  # green on a machine that happens to have caveman configured, 'missing' anywhere
+  # else (CI included). Same reason the header comment gives for run_install.
+  CLAUDE_HARNESS_TARGET="$1" XDG_CONFIG_HOME="$2" node "$1/claude-harness/onboarding/verify.js" --json
 }
 
 echo "=== Test 1: non-interactive flags -- always-on ok, caveman/memory pending-manual-paste (no settings.json in scratch) ==="
@@ -42,7 +48,7 @@ T1="$WORK/t1_target"
 C1="$WORK/t1_config"
 mkdir -p "$T1" "$C1"
 run_install "$T1" "$C1" --with-memory-hooks --caveman-mode=lite > "$WORK/t1.out" 2>&1 || fail "install.sh exited nonzero: $(cat "$WORK/t1.out")"
-OUT=$(run_verify_json "$T1")
+OUT=$(run_verify_json "$T1" "$C1")
 echo "$OUT" | grep -q '"tier":"always-on","status":"ok"' || fail "expected always-on ok, got: $OUT"
 echo "$OUT" | grep -q '"tier":"caveman","status":"pending-manual-paste"' || fail "expected caveman pending-manual-paste, got: $OUT"
 echo "$OUT" | grep -q '"tier":"memory-hooks","status":"pending-manual-paste"' || fail "expected memory-hooks pending-manual-paste, got: $OUT"
@@ -60,7 +66,7 @@ C3="$WORK/t3_config"
 mkdir -p "$T3" "$C3"
 printf 'y\nlite\n' | (cd "$REPO_DIR" && CLAUDE_HARNESS_TARGET="$T3" XDG_CONFIG_HOME="$C3" bash install.sh --onboard) > "$WORK/t3.out" 2>&1 \
   || fail "install.sh --onboard exited nonzero: $(cat "$WORK/t3.out")"
-OUT3=$(run_verify_json "$T3")
+OUT3=$(run_verify_json "$T3" "$C3")
 echo "$OUT3" | grep -q '"tier":"always-on","status":"ok"' || fail "onboard path: expected always-on ok, got: $OUT3"
 echo "$OUT3" | grep -q '"tier":"memory-hooks","status":"pending-manual-paste"' || fail "onboard path: expected memory-hooks pending-manual-paste (i.e. the 'y' answer was honored), got: $OUT3"
 grep -q '"defaultMode": "lite"' "$C3/caveman/config.json" || fail "onboard path: expected defaultMode lite (i.e. the 'lite' answer was honored)"

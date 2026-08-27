@@ -27,7 +27,7 @@ function main() {
   const cpPath = path.join(sessionDir, 'checkpoint.md');
   const lockPath = path.join(sessionDir, '.checkpoint.lock');
 
-  lib.withLock(lockPath, () => {
+  const wrote = lib.withLock(lockPath, () => {
     const existing = fs.existsSync(cpPath) ? fs.readFileSync(cpPath, 'utf8') : '';
     const cp = lib.parseCheckpoint(existing);
     cp.scope = scope;
@@ -43,12 +43,19 @@ function main() {
     lib.atomicWrite(cpPath, lib.serializeCheckpoint(cp));
   });
   // withLock returning false (lock contended) means we skip this cycle's
-  // write rather than block the edit that just happened — by design.
+  // write rather than block the edit that just happened — by design. Still
+  // worth a line: one skipped cycle is harmless (the next Edit rewrites it),
+  // but a lock nothing ever releases makes the checkpoint quietly stop
+  // tracking anything, which is indistinguishable from an idle session.
+  if (!wrote) lib.recordHookError(new Error(`lock contended: ${lockPath}`), 'checkpoint write skipped');
 }
 
 try {
   main();
-} catch (_) {
+} catch (err) {
   // Fail open: a broken checkpoint write must never block an Edit/Write.
+  // Recorded rather than swallowed -- a hook that throws on every Edit looks
+  // exactly like one with nothing to do. See _lib.js's diagnostics note.
+  lib.recordHookError(err, 'memory-checkpoint failed');
 }
 process.exit(0);

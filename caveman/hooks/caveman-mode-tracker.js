@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { getDefaultMode } = require('./caveman-config');
+const { getDefaultMode, warn } = require('./caveman-config');
 
 const flagPath = path.join(os.homedir(), '.claude', '.caveman-active');
 
@@ -73,6 +73,17 @@ function isRealDeactivation(prompt) {
   return false;
 }
 
+// A flag that can't be removed leaves caveman looking active (statusline badge,
+// per-turn reminder) after the user asked for it to stop -- the one failure here
+// that contradicts an explicit instruction, so it never stays silent.
+function clearFlag() {
+  try {
+    fs.unlinkSync(flagPath);
+  } catch (e) {
+    if (e.code !== 'ENOENT') warn(`cannot clear ${flagPath} (${e.code || e.message}) -- caveman may still appear active`);
+  }
+}
+
 let input = '';
 process.stdin.on('data', chunk => { input += chunk; });
 process.stdin.on('end', () => {
@@ -107,18 +118,25 @@ process.stdin.on('end', () => {
         fs.mkdirSync(path.dirname(flagPath), { recursive: true });
         fs.writeFileSync(flagPath, mode);
       } else if (mode === 'off') {
-        try { fs.unlinkSync(flagPath); } catch (e) {}
+        clearFlag();
       }
     }
 
     // Detect deactivation -- see isRealDeactivation's header comment above.
     if (isRealDeactivation(prompt)) {
-      try { fs.unlinkSync(flagPath); } catch (e) {}
+      clearFlag();
     }
 
     // Per-turn reinforcement (see header comment for why this exists).
     let activeMode = '';
-    try { activeMode = fs.readFileSync(flagPath, 'utf8').trim(); } catch (e) {}
+    try {
+      activeMode = fs.readFileSync(flagPath, 'utf8').trim();
+    } catch (e) {
+      // No flag means no active mode -- the normal path. Anything else means the
+      // per-turn reinforcement below silently stops firing, which reads as
+      // "caveman drifted off" rather than "the hook can't read its own flag".
+      if (e.code !== 'ENOENT') warn(`cannot read ${flagPath} (${e.code || e.message}) -- skipping per-turn reminder`);
+    }
 
     if (activeMode && activeMode !== 'off' && !INDEPENDENT_MODES.has(activeMode)) {
       process.stdout.write(
@@ -128,6 +146,10 @@ process.stdin.on('end', () => {
       );
     }
   } catch (e) {
-    // Silent fail
+    // Fail open: never block a prompt. Recorded on stderr because this catch
+    // also covers a JSON.parse of the hook payload -- if that shape ever
+    // changes, mode switching and deactivation both stop working, with the
+    // stale flag file making it look like caveman is still tracking normally.
+    warn(`prompt hook failed (${e.message}) -- mode tracking skipped for this turn`);
   }
 });

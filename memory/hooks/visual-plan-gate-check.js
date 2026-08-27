@@ -63,8 +63,12 @@ function handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath) 
     let planText = '';
     try {
       planText = fs.readFileSync(sessState.planFilePath, 'utf8');
-    } catch (_) {
-      return; // plan file vanished/unreadable -- fail open
+    } catch (err) {
+      // Fail open either way, but a plan file that vanished is the normal case
+      // (scratch file, cleaned up) while an unreadable one means this gate is
+      // silently off for the rest of the session -- not the same thing.
+      if (err.code !== 'ENOENT') lib.recordHookError(err, `reading plan file ${sessState.planFilePath}`);
+      return;
     }
     if (isNonTrivial(planText) && !sessState.artifactPublished) {
       sessState.pending = { at: lib.nowISO() };
@@ -125,7 +129,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  // Fail open -- a broken visual-plan gate check must never block a real tool call.
+} catch (err) {
+  // Fail open -- a broken visual-plan gate check must never block a real tool
+  // call. Recorded so a permanently-throwing gate can't masquerade as passing.
+  lib.recordHookError(err, 'visual-plan-gate-check failed');
 }
 process.exit(0);

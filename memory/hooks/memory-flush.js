@@ -28,7 +28,9 @@ function main() {
 
 try {
   main();
-} catch (_) {
-  /* best-effort only, by design */
+} catch (err) {
+  // Best-effort by design, but recorded: this is the only hook whose failures
+  // nothing downstream would ever notice. See _lib.js's diagnostics note.
+  lib.recordHookError(err, 'memory-flush failed');
 }
 process.exit(0);
