@@ -40,7 +40,10 @@ fail() { echo "FAIL: $1"; exit 1; }
 # input" so a dev machine's real ~/.config/caveman or an already-exported
 # CAVEMAN_DEFAULT_MODE can never decide an assertion's outcome.
 sandbox_env() {
-  if [ "$1" = "-" ]; then unset XDG_CONFIG_HOME; else export XDG_CONFIG_HOME="$(win_path "$1")"; fi
+  # APPDATA goes with XDG_CONFIG_HOME: it is the win32 branch's own lookup,
+  # ahead of the homedir fallback, so leaving a runner's real APPDATA in place
+  # would make the "no config home configured" case resolve somewhere real.
+  if [ "$1" = "-" ]; then unset XDG_CONFIG_HOME APPDATA; else export XDG_CONFIG_HOME="$(win_path "$1")"; fi
   if [ "$2" = "-" ]; then unset CAVEMAN_DEFAULT_MODE; else export CAVEMAN_DEFAULT_MODE="$2"; fi
   export USERPROFILE="$FAKE_HOME" HOME="$FAKE_HOME"
 }
@@ -196,9 +199,11 @@ PATH_OUT=$(call_config getConfigPath "$CFG13" -)
 pass "getConfigDir/getConfigPath resolve under XDG_CONFIG_HOME"
 
 echo "=== Test 19: with XDG_CONFIG_HOME unset, the config dir falls back under the home directory ==="
-DIR=$(call_config getConfigDir - -)
-case "$DIR" in *caveman) ;; *) fail "expected the fallback dir to end in 'caveman', got: $DIR";; esac
-case "$DIR" in "$FAKE_HOME"*) ;; *) fail "expected the fallback dir under the sandboxed home ($FAKE_HOME), got: $DIR";; esac
+DIR=$(call_config getConfigDir - - | tr '\\' '/')
+case "$DIR" in */caveman) ;; *) fail "expected the fallback dir to end in 'caveman', got: $DIR";; esac
+# The fallback is ~/.config/caveman on posix and ~/AppData/Roaming/caveman on
+# win32 -- what both must share is the sandboxed home as their root.
+case "$DIR" in "$(printf '%s' "$FAKE_HOME" | tr '\\' '/')"*) ;; *) fail "expected the fallback dir under the sandboxed home ($FAKE_HOME), got: $DIR";; esac
 pass "config dir falls back to a home-relative path when XDG_CONFIG_HOME is unset"
 
 # ---------------------------------------------------------------------------
