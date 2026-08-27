@@ -9,16 +9,7 @@
 // as context on every single prompt (unlike most hook events), so a cheap
 // per-turn reminder here is the anchor that actually survives session length.
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { getDefaultMode } = require('./caveman-config');
-
-const flagPath = path.join(os.homedir(), '.claude', '.caveman-active');
-
-// One-shot skill invocations, not persistent chat-style levels — no chat
-// reinforcement reminder applies to these.
-const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
+const { getDefaultMode, writeFlag, clearFlag, readFlag, INDEPENDENT_MODES } = require('./caveman-config');
 
 // Deactivation must be a real directive, not a quoted mention or a negated
 // reference to the phrase -- a bare substring test over the whole prompt
@@ -104,21 +95,19 @@ process.stdin.on('end', () => {
       }
 
       if (mode && mode !== 'off') {
-        fs.mkdirSync(path.dirname(flagPath), { recursive: true });
-        fs.writeFileSync(flagPath, mode);
+        writeFlag(mode);
       } else if (mode === 'off') {
-        try { fs.unlinkSync(flagPath); } catch (e) {}
+        clearFlag();
       }
     }
 
     // Detect deactivation -- see isRealDeactivation's header comment above.
     if (isRealDeactivation(prompt)) {
-      try { fs.unlinkSync(flagPath); } catch (e) {}
+      clearFlag();
     }
 
     // Per-turn reinforcement (see header comment for why this exists).
-    let activeMode = '';
-    try { activeMode = fs.readFileSync(flagPath, 'utf8').trim(); } catch (e) {}
+    const activeMode = readFlag();
 
     if (activeMode && activeMode !== 'off' && !INDEPENDENT_MODES.has(activeMode)) {
       process.stdout.write(

@@ -19,6 +19,28 @@ const VALID_MODES = [
   'commit', 'review', 'compress'
 ];
 
+// One-shot skill invocations, not persistent chat-style intensity levels.
+const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
+
+// Flag file read by the statusline scripts and per-turn reminder.
+function getFlagPath() {
+  return path.join(os.homedir(), '.claude', '.caveman-active');
+}
+
+function writeFlag(mode) {
+  const flagPath = getFlagPath();
+  fs.mkdirSync(path.dirname(flagPath), { recursive: true });
+  fs.writeFileSync(flagPath, mode);
+}
+
+function clearFlag() {
+  try { fs.unlinkSync(getFlagPath()); } catch (e) { /* already gone — fine */ }
+}
+
+function readFlag() {
+  try { return fs.readFileSync(getFlagPath(), 'utf8').trim(); } catch (e) { return ''; }
+}
+
 function getConfigDir() {
   if (process.env.XDG_CONFIG_HOME) {
     return path.join(process.env.XDG_CONFIG_HOME, 'caveman');
@@ -58,4 +80,7 @@ function getDefaultMode() {
   return 'full';
 }
 
-module.exports = { getDefaultMode, getConfigDir, getConfigPath, VALID_MODES };
+module.exports = {
+  getDefaultMode, getConfigDir, getConfigPath, VALID_MODES,
+  INDEPENDENT_MODES, getFlagPath, writeFlag, clearFlag, readFlag,
+};

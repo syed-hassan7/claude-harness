@@ -114,44 +114,22 @@ function handleUserPromptSubmit(sessState) {
   };
 }
 
-function main() {
-  const input = lib.readHookInput();
-  if (input.tool_name && !isRelevantPostToolUse(input)) return; // nothing this call could change -- skip all state I/O
-
-  const cwd = input.cwd || process.cwd();
-  const sessionId = input.session_id || 'unknown';
-  const { base } = lib.resolveScope(cwd);
-  const { dir, statePath, logPath, lockPath } = lib.gatePaths(base, 'design-lane-gate');
-
-  const state = lib.readGateState(statePath);
-  const sessState = state[sessionId] || { uiTouched: false, screenshotSeen: false, pending: null, pendingNativeControl: null };
-
-  let output = null;
-  if (input.tool_name) {
-    handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
-  } else {
-    output = handleUserPromptSubmit(sessState);
-  }
-
-  sessState.lastSeen = lib.nowISO();
-  state[sessionId] = sessState;
-  lib.pruneIdleGateSessions(state, dir, logPath, lockPath, {
-    ttlMs: SESSION_TTL_MS,
-    pendingFields: ['pending', 'pendingNativeControl'],
-    describeExpired: (id, field) =>
-      field === 'pendingNativeControl'
-        ? `EXPIRED | ${lib.nowISO()} | session ${id} | native-control nudge never surfaced, pruned after 30d idle`
-        : `EXPIRED | ${lib.nowISO()} | session ${id} | design-lane MISS never surfaced, pruned after 30d idle`,
-  });
-
-  lib.writeGateState(dir, statePath, lockPath, state);
-
-  if (output) process.stdout.write(JSON.stringify(output));
-}
-
-try {
-  main();
-} catch (_) {
-  // Fail open -- a broken design-lane gate check must never block a real tool call.
-}
+lib.runGateHook({
+  gateName: 'design-lane-gate',
+  defaultSessionState: { uiTouched: false, screenshotSeen: false, pending: null, pendingNativeControl: null },
+  ttlMs: SESSION_TTL_MS,
+  pendingFields: ['pending', 'pendingNativeControl'],
+  describeExpired: (id, field) =>
+    field === 'pendingNativeControl'
+      ? `EXPIRED | ${lib.nowISO()} | session ${id} | native-control nudge never surfaced, pruned after 30d idle`
+      : `EXPIRED | ${lib.nowISO()} | session ${id} | design-lane MISS never surfaced, pruned after 30d idle`,
+  shouldProcess: (input) => !input.tool_name || isRelevantPostToolUse(input), // nothing a non-relevant call could change -- skip all state I/O
+  handle: (input, { sessState, sessionId, dir, logPath, lockPath }) => {
+    if (input.tool_name) {
+      handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
+      return null;
+    }
+    return handleUserPromptSubmit(sessState);
+  },
+});
 process.exit(0);

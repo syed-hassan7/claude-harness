@@ -91,41 +91,19 @@ function handleUserPromptSubmit(sessState) {
   };
 }
 
-function main() {
-  const input = lib.readHookInput();
-  if (input.tool_name && !isRelevantPostToolUse(input)) return;
-
-  const cwd = input.cwd || process.cwd();
-  const sessionId = input.session_id || 'unknown';
-  const { base } = lib.resolveScope(cwd);
-  const { dir, statePath, logPath, lockPath } = lib.gatePaths(base, 'visual-plan-gate');
-
-  const state = lib.readGateState(statePath);
-  const sessState = state[sessionId] || { planFilePath: null, artifactPublished: false, pending: null };
-
-  let output = null;
-  if (input.tool_name) {
-    handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
-  } else {
-    output = handleUserPromptSubmit(sessState);
-  }
-
-  sessState.lastSeen = lib.nowISO();
-  state[sessionId] = sessState;
-  lib.pruneIdleGateSessions(state, dir, logPath, lockPath, {
-    ttlMs: SESSION_TTL_MS,
-    pendingFields: ['pending'],
-    describeExpired: (id) => `EXPIRED | ${lib.nowISO()} | session ${id} | visual-plan MISS never surfaced, pruned after 30d idle`,
-  });
-
-  lib.writeGateState(dir, statePath, lockPath, state);
-
-  if (output) process.stdout.write(JSON.stringify(output));
-}
-
-try {
-  main();
-} catch (_) {
-  // Fail open -- a broken visual-plan gate check must never block a real tool call.
-}
+lib.runGateHook({
+  gateName: 'visual-plan-gate',
+  defaultSessionState: { planFilePath: null, artifactPublished: false, pending: null },
+  ttlMs: SESSION_TTL_MS,
+  pendingFields: ['pending'],
+  describeExpired: (id) => `EXPIRED | ${lib.nowISO()} | session ${id} | visual-plan MISS never surfaced, pruned after 30d idle`,
+  shouldProcess: (input) => !input.tool_name || isRelevantPostToolUse(input),
+  handle: (input, { sessState, sessionId, dir, logPath, lockPath }) => {
+    if (input.tool_name) {
+      handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
+      return null;
+    }
+    return handleUserPromptSubmit(sessState);
+  },
+});
 process.exit(0);

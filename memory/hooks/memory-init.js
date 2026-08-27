@@ -19,6 +19,23 @@ const LESSONS_INDEX_CAP_BYTES = 8000; // pragmatic cap, see memory/SPEC.md's
 const PROJECT_ARCH_CAP_BYTES = 8000;
 const GLOBAL_ARCH_CAP_BYTES = 2000;
 
+// Reads an index file, truncating to capBytes with a loud notice (mined from
+// NousResearch/hermes-agent's fail-on-overflow memory tool, 2026-08-11) --
+// say what got cut and how much, don't just point at the file and let the
+// agent discover the gap.
+function readIndexCapped(idxPath, capBytes) {
+  let idx = fs.readFileSync(idxPath, 'utf8');
+  if (Buffer.byteLength(idx, 'utf8') > capBytes) {
+    const kept = idx.slice(0, capBytes);
+    const droppedLines = idx
+      .slice(capBytes)
+      .split('\n')
+      .filter((l) => l.trim().length).length;
+    idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${idxPath}`;
+  }
+  return idx;
+}
+
 function main() {
   const input = lib.readHookInput();
   const cwd = input.cwd || process.cwd();
@@ -74,19 +91,8 @@ function main() {
   }
 
   if (fs.existsSync(lessonsIndexPath)) {
-    let idx = fs.readFileSync(lessonsIndexPath, 'utf8');
+    const idx = readIndexCapped(lessonsIndexPath, LESSONS_INDEX_CAP_BYTES);
     const lessonsNonEmpty = idx.trim().length > 0;
-    if (Buffer.byteLength(idx, 'utf8') > LESSONS_INDEX_CAP_BYTES) {
-      const kept = idx.slice(0, LESSONS_INDEX_CAP_BYTES);
-      const droppedLines = idx
-        .slice(LESSONS_INDEX_CAP_BYTES)
-        .split('\n')
-        .filter((l) => l.trim().length).length;
-      // Loud, not silent (mined from NousResearch/hermes-agent's fail-on-
-      // overflow memory tool, 2026-08-11) — say what got cut and how much,
-      // don't just point at the file and let the agent discover the gap.
-      idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${lessonsIndexPath}`;
-    }
     parts.push('## Claude Harness — lessons index\n\n' + idx.trim());
 
     // Lesson-promotion review nudge (memory/SPEC.md "Lesson-promotion memory").
@@ -98,16 +104,11 @@ function main() {
     if (lessonsNonEmpty) {
       try {
         const promotionStatePath = path.join(base, 'promotion', 'state.json');
-        let lastReviewedAt = null;
-        if (fs.existsSync(promotionStatePath)) {
-          try {
-            const state = JSON.parse(fs.readFileSync(promotionStatePath, 'utf8'));
-            lastReviewedAt = state && typeof state.lastReviewedAt === 'string' ? state.lastReviewedAt : null;
-          } catch (_) {
-            /* malformed state file -- treat as never-reviewed (fail toward
-               nudging, not toward silence), never block SessionStart over it */
-          }
-        }
+        // A missing or malformed state file reads as never-reviewed (fail
+        // toward nudging, not toward silence), never blocks SessionStart.
+        const promotionState = lib.readJSONSafe(promotionStatePath, null);
+        const lastReviewedAt =
+          promotionState && typeof promotionState.lastReviewedAt === 'string' ? promotionState.lastReviewedAt : null;
         // NaN-safe by construction: Date.parse of a missing/malformed watermark
         // is NaN, and `indexMtimeMs > NaN` is false in JS -- which would read a
         // corrupt watermark as "already reviewed," the wrong failure direction
@@ -143,15 +144,7 @@ function main() {
   // compact one-line-per-note index so the agent knows what exists.
   function injectArchIndex(label, idxPath, capBytes) {
     if (!fs.existsSync(idxPath)) return;
-    let idx = fs.readFileSync(idxPath, 'utf8');
-    if (Buffer.byteLength(idx, 'utf8') > capBytes) {
-      const kept = idx.slice(0, capBytes);
-      const droppedLines = idx
-        .slice(capBytes)
-        .split('\n')
-        .filter((l) => l.trim().length).length;
-      idx = kept + `\n... truncated: ${droppedLines} older entr${droppedLines === 1 ? 'y' : 'ies'} cut, see ${idxPath}`;
-    }
+    const idx = readIndexCapped(idxPath, capBytes);
     parts.push(`## Claude Harness — ${label}\n\n${idx.trim()}`);
   }
 
@@ -171,19 +164,15 @@ function main() {
   // every session is noise that doesn't change what the agent does next;
   // silence when clean, same context-economy audit rule as everything else
   // this hook injects.
-  const canaryStatePath = path.join(base, 'canary', 'state.json');
-  if (fs.existsSync(canaryStatePath)) {
-    try {
-      const canaryState = JSON.parse(fs.readFileSync(canaryStatePath, 'utf8'));
-      const openCount = Object.values(canaryState).filter((s) => s && s.pending).length;
-      if (openCount) {
-        const canaryLogPath = path.join(base, 'canary', 'log.md');
-        parts.push(
-          `## Claude Harness — drift canary\n\n${openCount} open naming-miss${openCount === 1 ? '' : 'es'} across recent sessions — see ${canaryLogPath}`
-        );
-      }
-    } catch (_) {
-      /* malformed state file -- skip the rollup, never block SessionStart over it */
+  // A missing or malformed state file skips the rollup, never blocks SessionStart.
+  const canaryState = lib.readJSONSafe(path.join(base, 'canary', 'state.json'), null);
+  if (canaryState) {
+    const openCount = Object.values(canaryState).filter((s) => s && s.pending).length;
+    if (openCount) {
+      const canaryLogPath = path.join(base, 'canary', 'log.md');
+      parts.push(
+        `## Claude Harness — drift canary\n\n${openCount} open naming-miss${openCount === 1 ? '' : 'es'} across recent sessions — see ${canaryLogPath}`
+      );
     }
   }
 

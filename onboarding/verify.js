@@ -11,18 +11,15 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+// The layout is identical in the repo and under PACK_DIR (install.sh syncs
+// caveman/ and onboarding/ side by side), so the runtime resolver is always
+// a sibling -- verify checks the exact config path the hooks actually read,
+// rather than re-deriving it.
+const { getConfigPath: cavemanConfigPath } = require(path.join(__dirname, '..', 'caveman', 'hooks', 'caveman-config.js'));
 
 const CLAUDE_DIR = process.env.CLAUDE_HARNESS_TARGET || path.join(os.homedir(), '.claude');
 const PACK_DIR = path.join(CLAUDE_DIR, 'claude-harness');
 const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
-
-function cavemanConfigPath() {
-  let dir;
-  if (process.env.XDG_CONFIG_HOME) dir = path.join(process.env.XDG_CONFIG_HOME, 'caveman');
-  else if (process.env.APPDATA) dir = path.join(process.env.APPDATA, 'caveman');
-  else dir = path.join(os.homedir(), '.config', 'caveman');
-  return path.join(dir, 'config.json');
-}
 
 function settingsContains(needle) {
   try {

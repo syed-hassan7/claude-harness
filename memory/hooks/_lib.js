@@ -92,6 +92,17 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// Best-effort JSON file read: missing file, unreadable file, or malformed
+// JSON all return `fallback` -- every hook that reads a state/config JSON
+// file treats those three cases identically (fail open, never throw).
+function readJSONSafe(filePath, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return fallback;
+  }
+}
+
 // "git" and "commit" in the same clause, unbroken by a chain separator
 // (&, |, ;) -- so `git status && docker commit foo` does not false-match.
 // Text pattern, not a tool_response exit-code check: reading tool_response
@@ -309,13 +320,8 @@ function extractSection(body, header) {
 }
 
 function readWatchMap(base) {
-  const p = path.join(base, 'architecture', 'watch-map.json');
-  try {
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
-    return {};
-  }
+  const parsed = readJSONSafe(path.join(base, 'architecture', 'watch-map.json'), {});
+  return parsed && typeof parsed === 'object' ? parsed : {};
 }
 
 // Prefixes the matching index line with "[STALE?] " (idempotent -- no-op if
@@ -356,11 +362,7 @@ function gatePaths(base, gateName) {
 }
 
 function readGateState(statePath) {
-  try {
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch (_) {
-    return {};
-  }
+  return readJSONSafe(statePath, {});
 }
 
 function appendGateLog(dir, logPath, lockPath, lines) {
@@ -400,6 +402,43 @@ function pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFi
   appendGateLog(dir, logPath, lockPath, expired);
 }
 
+// Full gate-hook lifecycle, shared by canary-check.js/review-gate-check.js/
+// design-lane-gate-check.js/visual-plan-gate-check.js -- all 4 repeated the
+// same read-state/dispatch/touch-lastSeen/prune/write-state/emit-output
+// main() verbatim around their gate-specific logic. `shouldProcess` is the
+// optional cheap pre-check before any disk I/O (see design-lane-gate-check.js
+// for why); `handle(input, ctx)` does the gate-specific work against
+// ctx = { sessState, sessionId, dir, logPath, lockPath } and returns the
+// hook output object to emit, or null. Fail-open by construction: any throw
+// is swallowed here so a broken gate check never blocks the user's prompt or
+// tool call -- callers still own their trailing process.exit(0).
+function runGateHook({ gateName, defaultSessionState, ttlMs, pendingFields, describeExpired, shouldProcess, handle }) {
+  try {
+    const input = readHookInput();
+    if (shouldProcess && !shouldProcess(input)) return;
+
+    const cwd = input.cwd || process.cwd();
+    const sessionId = input.session_id || 'unknown';
+    const { base } = resolveScope(cwd);
+    const { dir, statePath, logPath, lockPath } = gatePaths(base, gateName);
+
+    const state = readGateState(statePath);
+    const sessState = state[sessionId] || Object.assign({}, defaultSessionState);
+
+    const output = handle(input, { sessState, sessionId, dir, logPath, lockPath });
+
+    sessState.lastSeen = nowISO();
+    state[sessionId] = sessState;
+    pruneIdleGateSessions(state, dir, logPath, lockPath, { ttlMs, pendingFields, describeExpired });
+
+    writeGateState(dir, statePath, lockPath, state);
+
+    if (output) process.stdout.write(JSON.stringify(output));
+  } catch (_) {
+    // Fail open -- a broken gate check must never block the user's prompt or a real tool call.
+  }
+}
+
 module.exports = {
   readHookInput,
   homeDir,
@@ -409,6 +448,7 @@ module.exports = {
   ensureGitignore,
   stripSecrets,
   nowISO,
+  readJSONSafe,
   readTranscriptSince,
   isGitCommitCommand,
   acquireLock,
@@ -428,4 +468,5 @@ module.exports = {
   appendGateLog,
   writeGateState,
   pruneIdleGateSessions,
+  runGateHook,
 };

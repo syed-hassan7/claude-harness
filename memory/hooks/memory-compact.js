@@ -18,7 +18,10 @@ function trimProjectArchive(archiveDir) {
     .readdirSync(archiveDir)
     .filter((f) => f.endsWith('.md'))
     .map((f) => ({ f, full: path.join(archiveDir, f), mtime: fs.statSync(path.join(archiveDir, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
+    // Filename tiebreak keeps eviction deterministic when mtimes collide at
+    // millisecond precision -- archive names are ISO timestamps, so
+    // lexicographic order matches chronological order.
+    .sort((a, b) => b.mtime - a.mtime || b.f.localeCompare(a.f));
 
   const cutoff = Date.now() - PROJECT_KEEP_DAYS * 24 * 60 * 60 * 1000;
   files.forEach((entry, i) => {

@@ -84,21 +84,11 @@ function extractAssistantText(lines) {
   return chunks.join('\n');
 }
 
-function main() {
-  const input = lib.readHookInput();
-  const cwd = input.cwd || process.cwd();
-  const sessionId = input.session_id || 'unknown';
+function handle(input, { sessState, sessionId, dir: canaryDir, logPath, lockPath }) {
   const transcriptPath = input.transcript_path || '';
-  const { base } = lib.resolveScope(cwd);
-
-  const { dir: canaryDir, statePath, logPath, lockPath } = lib.gatePaths(base, 'canary');
-
-  const state = lib.readGateState(statePath);
-  const sessState = state[sessionId] || { offset: 0, pending: null };
 
   const { lines, newOffset } = lib.readTranscriptSince(transcriptPath, sessState.offset);
   sessState.offset = newOffset;
-  sessState.lastSeen = lib.nowISO();
 
   if (lines.length) {
     const events = [];
@@ -133,40 +123,30 @@ function main() {
     if (events.length) lib.appendGateLog(canaryDir, logPath, lockPath, events);
   }
 
-  // Prune idle sessions so state.json doesn't grow unbounded across months --
-  // a known simplification, same "bound it, don't build eviction machinery
-  // until it's a real problem" posture as this file's other size caps. A
-  // session pruned with a still-open `pending` miss gets one EXPIRED line
-  // first -- otherwise the audit trail just loses the miss silently instead
-  // of closing it out.
-  state[sessionId] = sessState;
-  lib.pruneIdleGateSessions(state, canaryDir, logPath, lockPath, {
-    ttlMs: SESSION_TTL_MS,
-    pendingFields: ['pending'],
-    describeExpired: (id, _field, s) =>
-      `EXPIRED | ${lib.nowISO()} | session ${id} | miss on ${s.pending.file} never resolved, pruned after 30d idle`,
-  });
-
-  lib.writeGateState(canaryDir, statePath, lockPath, state);
-
-  if (sessState.pending) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'UserPromptSubmit',
-          additionalContext:
-            `## Claude Harness -- drift canary miss\n\n` +
-            `Cited ${sessState.pending.file} without naming Zarak last turn. ` +
-            `WORKFLOW.md's drift canary applies -- resume it in this response if still discussing a pack rule.`,
-        },
-      })
-    );
-  }
+  if (!sessState.pending) return null;
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext:
+        `## Claude Harness -- drift canary miss\n\n` +
+        `Cited ${sessState.pending.file} without naming Zarak last turn. ` +
+        `WORKFLOW.md's drift canary applies -- resume it in this response if still discussing a pack rule.`,
+    },
+  };
 }
 
-try {
-  main();
-} catch (_) {
-  // Fail open -- a broken canary check must never block the user's prompt.
-}
+// Idle-session pruning bounds state.json growth across months -- a known
+// simplification, same "bound it, don't build eviction machinery until it's
+// a real problem" posture as this file's other size caps. A session pruned
+// with a still-open `pending` miss gets one EXPIRED line first -- otherwise
+// the audit trail just loses the miss silently instead of closing it out.
+lib.runGateHook({
+  gateName: 'canary',
+  defaultSessionState: { offset: 0, pending: null },
+  ttlMs: SESSION_TTL_MS,
+  pendingFields: ['pending'],
+  describeExpired: (id, _field, s) =>
+    `EXPIRED | ${lib.nowISO()} | session ${id} | miss on ${s.pending.file} never resolved, pruned after 30d idle`,
+  handle,
+});
 process.exit(0);

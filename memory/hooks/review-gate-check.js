@@ -65,39 +65,18 @@ function handleUserPromptSubmit(sessState) {
   };
 }
 
-function main() {
-  const input = lib.readHookInput();
-  const cwd = input.cwd || process.cwd();
-  const sessionId = input.session_id || 'unknown';
-  const { base } = lib.resolveScope(cwd);
-  const { dir, statePath, logPath, lockPath } = lib.gatePaths(base, 'review-gate');
-
-  const state = lib.readGateState(statePath);
-  const sessState = state[sessionId] || { reviewSeen: false, pending: null };
-
-  let output = null;
-  if (input.tool_name) {
-    handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
-  } else {
-    output = handleUserPromptSubmit(sessState);
-  }
-
-  sessState.lastSeen = lib.nowISO();
-  state[sessionId] = sessState;
-  lib.pruneIdleGateSessions(state, dir, logPath, lockPath, {
-    ttlMs: SESSION_TTL_MS,
-    pendingFields: ['pending'],
-    describeExpired: (id) => `EXPIRED | ${lib.nowISO()} | session ${id} | commit MISS never surfaced, pruned after 30d idle`,
-  });
-
-  lib.writeGateState(dir, statePath, lockPath, state);
-
-  if (output) process.stdout.write(JSON.stringify(output));
-}
-
-try {
-  main();
-} catch (_) {
-  // Fail open -- a broken review-gate check must never block a real tool call.
-}
+lib.runGateHook({
+  gateName: 'review-gate',
+  defaultSessionState: { reviewSeen: false, pending: null },
+  ttlMs: SESSION_TTL_MS,
+  pendingFields: ['pending'],
+  describeExpired: (id) => `EXPIRED | ${lib.nowISO()} | session ${id} | commit MISS never surfaced, pruned after 30d idle`,
+  handle: (input, { sessState, sessionId, dir, logPath, lockPath }) => {
+    if (input.tool_name) {
+      handlePostToolUse(input, sessState, sessionId, dir, logPath, lockPath);
+      return null;
+    }
+    return handleUserPromptSubmit(sessState);
+  },
+});
 process.exit(0);
